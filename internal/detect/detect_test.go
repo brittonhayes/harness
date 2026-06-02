@@ -86,42 +86,6 @@ logsource:
 	}
 }
 
-// TestExampleDetectionsAreValid guards against shipping a broken example rule.
-func TestExampleDetectionsAreValid(t *testing.T) {
-	results := ValidateDir("../../detections", true)
-	if len(results) == 0 {
-		t.Fatal("no example detections found under ../../detections")
-	}
-	for _, r := range results {
-		if !r.Valid {
-			t.Errorf("example %s is invalid:", r.Path)
-			for _, is := range r.Issues {
-				t.Errorf("    %s", is.String())
-			}
-		}
-	}
-}
-
-// TestExampleDetectionsTestsPass runs every example rule's inline `tests:`
-// through the evaluation engine, so shipped examples are demonstrably correct,
-// not just schema-valid.
-func TestExampleDetectionsTestsPass(t *testing.T) {
-	for _, r := range ValidateDir("../../detections", true) {
-		for _, rr := range TestFile(r.Path) {
-			if rr.Err != "" {
-				t.Errorf("%s: %s", r.Path, rr.Err)
-				continue
-			}
-			for _, c := range rr.Cases {
-				if !c.Passed() {
-					t.Errorf("%s: case %q want match=%v got match=%v err=%q",
-						r.Path, c.Name, c.Want, c.Got, c.Err)
-				}
-			}
-		}
-	}
-}
-
 func joinIssues(issues []Issue) string {
 	parts := make([]string, len(issues))
 	for i, is := range issues {

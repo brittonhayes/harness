@@ -45,7 +45,7 @@ harness
 One-shot, non-interactive:
 
 ```sh
-harness run "validate and test every rule in detections/, and report failures"
+harness run "validate and test every rule in my detections directory, and report failures"
 harness run --yes "author a Sigma rule for an attacker disabling GuardDuty: \
   study the reference rules first, add a runbook and two tests, then validate it"
 ```
@@ -96,10 +96,13 @@ report only what changed plus the validation status — never the whole file.
 
 ## Detections
 
-Detection rules are [Sigma](https://sigmahq.io) YAML files under `detections/`.
-Sigma is the vendor-neutral detection-as-code standard; rules convert to many
-SIEM backends (and platforms like [scanner.dev](https://scanner.dev) can ingest
-Sigma directly), so you write once and stay portable.
+Detection rules are [Sigma](https://sigmahq.io) YAML files. **harness ships no
+detections of its own** — you keep your rules wherever you already store them
+and point the harness at that directory with `detections_dir` (default
+`detections`, relative to the working directory). Sigma is the vendor-neutral
+detection-as-code standard; rules convert to many SIEM backends (and platforms
+like [scanner.dev](https://scanner.dev) can ingest Sigma directly), so you write
+once and stay portable.
 
 A rule requires at least `title`, `logsource`, and `detection` (with a
 `condition`). Harness rules also model two optional, schema-valid custom fields:
@@ -124,14 +127,14 @@ tests:
     match: false
 ```
 
-See [`detections/aws_root_account_usage.yml`](detections/aws_root_account_usage.yml)
-for a complete example with a runbook and tests, and the embedded exemplars under
-[`internal/reference/sigma/`](internal/reference/sigma).
+See the embedded gold-standard exemplars under
+[`internal/reference/sigma/`](internal/reference/sigma) (surfaced at runtime by
+`reference_detection`) for complete examples with runbooks and tests.
 
-Validate and test the whole directory at once:
+Validate and test your whole detections directory at once:
 
 ```sh
-harness run "validate and test every rule in detections/"
+harness run "validate and test every rule in my detections directory"
 ```
 
 ### Built-in evaluation engine
