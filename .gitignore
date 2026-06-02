@@ -1,0 +1,22 @@
+# Compiled binary (built with `go build -o harness ./cmd/harness`)
+/harness
+harness.exe
+
+# Build / release output
+/dist/
+
+# Go test & coverage artifacts
+*.test
+*.out
+coverage.txt
+
+# Local editor / agent state
+/.claude/
+.idea/
+.vscode/
+*.swp
+.DS_Store
+
+# Local harness config & session transcripts (if ever placed in-tree)
+.harness.json
+/sessions/

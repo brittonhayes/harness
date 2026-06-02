@@ -1,0 +1,68 @@
+title: AWS Root Account Usage
+id: 0d4f2c8b-6a1e-4f3d-9b2c-7e5a1c9d8f06
+status: stable
+description: |
+  Detects interactive activity by the AWS account root user. The root principal
+  has unrestricted access and should be used only for the few tasks that require
+  it. Unexpected root usage — console logins, API or CLI calls — is a strong
+  signal of misuse, a compromised account, or an unannounced break-glass event.
+references:
+  - https://attack.mitre.org/techniques/T1078/004/
+  - https://docs.aws.amazon.com/IAM/latest/UserGuide/id_root-user.html
+author: Harness
+date: 2024-06-09
+logsource:
+  product: aws
+  service: cloudtrail
+detection:
+  selection:
+    userIdentity.type: Root
+  # AWS-internal, service-triggered events are attributed to the account but are
+  # not interactive root usage; exclude them so the rule stays respondable
+  # instead of firing on background noise.
+  filter_service_event:
+    eventType: AwsServiceEvent
+  condition: selection and not filter_service_event
+falsepositives:
+  - Approved break-glass procedures performed under change control.
+  - Account/billing tasks that only root can perform (changing the account
+    name, support plan, or closing the account).
+  - Initial account setup before IAM users/roles are provisioned.
+level: high
+tags:
+  - attack.initial_access
+  - attack.privilege_escalation
+  - attack.t1078.004
+runbook:
+  triage:
+    - Confirm this is interactive root (not an AwsServiceEvent) and capture the
+      eventName, sourceIPAddress, and userAgent.
+    - Check whether a break-glass ticket or change window covers this usage.
+  investigate:
+    - Geolocate sourceIPAddress and compare the userAgent to known admin tools;
+      unfamiliar IP/agent raises severity.
+    - Enumerate every action taken in the root session, not just the first
+      event — root can disable controls and create persistence quickly.
+  contain:
+    - If unauthorized, rotate the root password, rotate/remove root access keys,
+      and confirm MFA on root is intact.
+    - Review for new IAM users, keys, or policy changes made during the session.
+  escalate:
+    - Page on-call immediately for any root usage without a matching break-glass
+      ticket.
+tests:
+  - name: interactive root console login fires
+    event:
+      userIdentity.type: Root
+      eventName: ConsoleLogin
+    match: true
+  - name: aws service event is filtered out
+    event:
+      userIdentity.type: Root
+      eventType: AwsServiceEvent
+    match: false
+  - name: iam user activity does not fire
+    event:
+      userIdentity.type: IAMUser
+      eventName: ConsoleLogin
+    match: false

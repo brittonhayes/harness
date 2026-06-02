@@ -1,0 +1,69 @@
+title: AWS IAM Access Key Created
+id: 0a5177f4-6ca9-44c2-aacf-d3f3d8b6e4d2
+status: stable
+description: |
+  Detects creation of a long-lived IAM access key. Adversaries create access
+  keys to establish durable, credential-based persistence that survives session
+  expiry and MFA — often for a user other than themselves, or for a
+  service/break-glass account that should never have static keys.
+references:
+  - https://attack.mitre.org/techniques/T1098/001/
+  - https://docs.aws.amazon.com/IAM/latest/UserGuide/id_credentials_access-keys.html
+author: Harness
+date: 2024-06-09
+logsource:
+  product: aws
+  service: cloudtrail
+detection:
+  selection:
+    eventSource: iam.amazonaws.com
+    eventName: CreateAccessKey
+  # AWS cannot compare two event fields in a Sigma condition, so we do NOT try
+  # to express "key created for a different user" here — that determination is
+  # left to the runbook, which compares userIdentity.arn to the target user.
+  # Filtering on that brittle comparison upstream would drop true positives.
+  condition: selection
+falsepositives:
+  - A user rotating their own access key (the actor in userIdentity.arn matches
+    responseElements.accessKey.userName).
+  - Approved automation provisioning keys for a new service account under change
+    control.
+level: medium
+tags:
+  - attack.persistence
+  - attack.privilege_escalation
+  - attack.t1098.001
+runbook:
+  triage:
+    - Compare the actor (userIdentity.arn) with the target user
+      (responseElements.accessKey.userName). Different principals = escalate;
+      same principal = likely self-rotation.
+    - Check whether the target is a human, a service account, or root. Static
+      keys on service/root accounts are an immediate finding.
+  investigate:
+    - Confirm whether a corresponding DeleteAccessKey (rotation) occurred for
+      the target; rotation deletes the old key, backdooring does not.
+    - Review the actor's recent IAM activity for other persistence (new users,
+      login profiles, policy attachments).
+  contain:
+    - Deactivate and delete the new access key if it is unauthorized.
+    - Review and revoke the actor's access if the creation was not legitimate.
+  escalate:
+    - Page the on-call analyst when a key is created for root, for another
+      human user, or for a service account that is supposed to use roles only.
+tests:
+  - name: create access key fires
+    event:
+      eventSource: iam.amazonaws.com
+      eventName: CreateAccessKey
+    match: true
+  - name: create user does not fire
+    event:
+      eventSource: iam.amazonaws.com
+      eventName: CreateUser
+    match: false
+  - name: non-iam source does not fire
+    event:
+      eventSource: ec2.amazonaws.com
+      eventName: CreateAccessKey
+    match: false

@@ -1,0 +1,63 @@
+title: AWS Config Recording Disabled
+id: 07330162-dba1-4746-8121-a9647d49d297
+status: stable
+description: |
+  Detects disabling of AWS Config recording by stopping the configuration
+  recorder or deleting its delivery channel. AWS Config is a key source of
+  resource-change history; turning it off is a defense-evasion step that removes
+  evidence of subsequent infrastructure changes.
+references:
+  - https://attack.mitre.org/techniques/T1562/008/
+  - https://docs.aws.amazon.com/config/latest/developerguide/stop-start-recorder.html
+author: Harness
+date: 2024-06-09
+logsource:
+  product: aws
+  service: cloudtrail
+detection:
+  selection:
+    eventSource: config.amazonaws.com
+    eventName:
+      - StopConfigurationRecorder
+      - DeleteConfigurationRecorder
+      - DeleteDeliveryChannel
+  condition: selection
+falsepositives:
+  - Planned decommissioning of AWS Config in a sandbox or during account
+    teardown, under an approved change.
+level: high
+tags:
+  - attack.defense_evasion
+  - attack.t1562.008
+runbook:
+  triage:
+    - Confirm which recorder/channel was affected and whether it covers a
+      production account.
+    - Resolve the actor and whether Config administration is part of their role.
+  investigate:
+    - Look for resource changes immediately after recording stopped — that is
+      usually what the actor wanted to hide.
+    - Check whether recording was restarted (transient) or left disabled
+      (persistent evasion).
+  contain:
+    - Restart the configuration recorder and recreate the delivery channel.
+    - Revoke the actor's access if the change was unauthorized.
+  escalate:
+    - Page on-call when recording is disabled in a production account by an
+      unexpected actor.
+tests:
+  - name: stop recorder fires
+    event:
+      eventSource: config.amazonaws.com
+      eventName: StopConfigurationRecorder
+    match: true
+  - name: delete delivery channel fires
+    event:
+      eventSource: config.amazonaws.com
+      eventName: DeleteDeliveryChannel
+    match: true
+  - name: describe recorders does not fire
+    event:
+      eventSource: config.amazonaws.com
+      eventName: DescribeConfigurationRecorders
+    match: false

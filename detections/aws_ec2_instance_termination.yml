@@ -1,0 +1,41 @@
+title: AWS EC2 Instance Termination
+id: 4e2a9b6c-2f3d-4d1a-8c7e-9b1f0a5d3e21
+status: experimental
+description: |
+  Detects termination of EC2 instances via the CloudTrail TerminateInstances
+  API call. Destroying compute resources can cause service disruption and
+  irreversible loss of instance store data, and is a common technique for
+  impact/destruction or for covering tracks after an intrusion. Bulk or
+  unexpected terminations should be tied to a known change.
+references:
+  - https://attack.mitre.org/techniques/T1485/
+  - https://docs.aws.amazon.com/AWSEC2/latest/APIReference/API_TerminateInstances.html
+author: Harness
+date: 2024-06-09
+logsource:
+  product: aws
+  service: cloudtrail
+detection:
+  selection:
+    eventSource: ec2.amazonaws.com
+    eventName: TerminateInstances
+  condition: selection
+falsepositives:
+  - Planned decommissioning of instances under change control.
+  - Infrastructure-as-code teardown of ephemeral/test environments.
+  - Auto Scaling group scale-in or spot instance reclamation.
+level: medium
+tags:
+  - attack.impact
+  - attack.t1485
+tests:
+  - name: terminate instances fires
+    event:
+      eventSource: ec2.amazonaws.com
+      eventName: TerminateInstances
+    match: true
+  - name: describe instances does not fire
+    event:
+      eventSource: ec2.amazonaws.com
+      eventName: DescribeInstances
+    match: false

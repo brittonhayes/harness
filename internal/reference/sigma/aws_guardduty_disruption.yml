@@ -1,0 +1,69 @@
+title: AWS GuardDuty Disruption
+id: 6e61ee20-ce00-4f8d-8aee-bedd8216f7e3
+status: stable
+description: |
+  Detects tampering with Amazon GuardDuty: deleting or suspending the detector,
+  or adding a trusted-IP set that suppresses findings. Each is a defense-evasion
+  action that blinds threat detection, and is rarely part of normal operations.
+references:
+  - https://attack.mitre.org/techniques/T1562/001/
+  - https://docs.aws.amazon.com/guardduty/latest/ug/guardduty_suspend-disable.html
+author: Harness
+date: 2024-06-09
+logsource:
+  product: aws
+  service: cloudtrail
+detection:
+  selection:
+    eventSource: guardduty.amazonaws.com
+    eventName:
+      - DeleteDetector
+      - DisassociateFromMasterAccount
+      - StopMonitoringMembers
+      - CreateIPSet
+      - UpdateDetector
+  # CreateIPSet/UpdateDetector are dual-use (a real analyst may add an internal
+  # scanner to the trusted list). They stay in scope because the suppression
+  # risk is high; the runbook drives the benign-vs-malicious decision.
+  condition: selection
+falsepositives:
+  - Security team adding a known internal vulnerability scanner to a trusted IP
+    set under change control.
+  - Decommissioning GuardDuty in a sandbox account during teardown.
+level: high
+tags:
+  - attack.defense_evasion
+  - attack.t1562.001
+runbook:
+  triage:
+    - Identify which action occurred. DeleteDetector / StopMonitoringMembers
+      fully blinds detection (critical); CreateIPSet only suppresses specific
+      IPs (high).
+    - Resolve the actor and whether they own GuardDuty administration.
+  investigate:
+    - For CreateIPSet, retrieve the trusted IP list location
+      (requestParameters) and review which addresses were whitelisted.
+    - Correlate with the actor's surrounding activity for the real objective the
+      disruption was meant to hide.
+  contain:
+    - Re-create or re-enable the detector and re-associate member accounts.
+    - Remove the unauthorized trusted IP set.
+  escalate:
+    - Page on-call when the detector was deleted/suspended org-wide or the actor
+      is unexpected.
+tests:
+  - name: delete detector fires
+    event:
+      eventSource: guardduty.amazonaws.com
+      eventName: DeleteDetector
+    match: true
+  - name: create ip set fires
+    event:
+      eventSource: guardduty.amazonaws.com
+      eventName: CreateIPSet
+    match: true
+  - name: list detectors does not fire
+    event:
+      eventSource: guardduty.amazonaws.com
+      eventName: ListDetectors
+    match: false

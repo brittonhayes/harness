@@ -1,0 +1,76 @@
+title: AWS CloudTrail Logging Disabled
+id: 4db60cc0-36fb-42b7-9b58-a5b53019fb74
+status: stable
+description: |
+  Detects an attempt to stop, delete, or weaken a CloudTrail trail. CloudTrail
+  is the system of record for the account; disabling it is a high-confidence
+  defense-evasion move that usually precedes or accompanies other malicious
+  activity, because it blinds downstream detections.
+references:
+  - https://attack.mitre.org/techniques/T1562/008/
+  - https://docs.aws.amazon.com/awscloudtrail/latest/userguide/best-practices-security.html
+author: Harness
+date: 2024-06-09
+logsource:
+  product: aws
+  service: cloudtrail
+detection:
+  selection:
+    eventSource: cloudtrail.amazonaws.com
+    eventName:
+      - StopLogging
+      - DeleteTrail
+      - UpdateTrail
+      - PutEventSelectors
+  # UpdateTrail/PutEventSelectors are dual-use: a legitimate admin may retune a
+  # trail. Keep them in the selection (do not pre-filter) and lean on the
+  # runbook + falsepositives so a real downgrade is never silently dropped.
+  condition: selection
+falsepositives:
+  - Planned trail maintenance performed under an approved change ticket.
+  - Infrastructure-as-code applies that recreate or retune trails (the actor is
+    a CI/CD role, the change is in version control, and a window is announced).
+level: high
+tags:
+  - attack.defense_evasion
+  - attack.t1562.008
+runbook:
+  triage:
+    - Identify the trail (requestParameters.name) and whether it is the
+      organization or the primary multi-region trail. Org/primary trails are
+      higher severity than a redundant per-region trail.
+    - Resolve the actor from userIdentity (arn, type, accessKeyId) and whether
+      they normally administer logging.
+  investigate:
+    - Pull the actor's CloudTrail activity for the surrounding hour; disabling
+      logging is rarely the goal, it is cover for something else.
+    - Check whether logging was re-enabled shortly after (smash-and-grab) or
+      left off (persistence).
+  contain:
+    - Re-enable the trail (StartLogging) or restore it from IaC.
+    - If the actor is unexpected, disable their access keys / sessions and
+      preserve the access key ID for scoping.
+  escalate:
+    - Page the on-call detection engineer when the org/primary trail was
+      stopped or deleted and the actor is not a known logging admin.
+tests:
+  - name: stop logging fires
+    event:
+      eventSource: cloudtrail.amazonaws.com
+      eventName: StopLogging
+    match: true
+  - name: delete trail fires
+    event:
+      eventSource: cloudtrail.amazonaws.com
+      eventName: DeleteTrail
+    match: true
+  - name: unrelated s3 read does not fire
+    event:
+      eventSource: s3.amazonaws.com
+      eventName: GetObject
+    match: false
+  - name: cloudtrail read-only call does not fire
+    event:
+      eventSource: cloudtrail.amazonaws.com
+      eventName: DescribeTrails
+    match: false

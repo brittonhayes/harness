@@ -1,0 +1,454 @@
+package ui
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/anthropics/anthropic-sdk-go"
+	"github.com/brittonhayes/harness/internal/session"
+	"github.com/charmbracelet/bubbles/key"
+	"github.com/charmbracelet/bubbles/spinner"
+	"github.com/charmbracelet/bubbles/textarea"
+	"github.com/charmbracelet/bubbles/viewport"
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+)
+
+// spinnerFrames is a smooth braille cycle that reads as continuous motion.
+var spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+
+// --- messages forwarded from the agent goroutine into the event loop ---
+
+type assistantMsg string
+type toolCallMsg struct{ name, summary string }
+type toolResultMsg struct {
+	name, content string
+	isErr         bool
+}
+type deniedMsg struct{ name string }
+type turnDoneMsg struct {
+	history []anthropic.MessageParam
+	err     error
+}
+
+// permMsg asks the operator to approve a tool call. The agent goroutine blocks
+// on reply until the UI answers.
+type permMsg struct {
+	name, summary string
+	reply         chan bool
+}
+
+// chatModel is the Bubble Tea model: a scrolling transcript with an always-on
+// input box at the bottom that accepts new messages even while the agent runs.
+type chatModel struct {
+	repl   *REPL
+	styles Styles
+	md     *markdownRenderer
+
+	vp viewport.Model
+	ta textarea.Model
+	sp spinner.Model
+
+	width, height int
+	ready         bool
+
+	blocks  []string                 // rendered transcript blocks, top to bottom
+	history []anthropic.MessageParam // conversation carried across turns
+	queue   []string                 // messages typed while a turn is running
+
+	running bool
+	phase   string
+	started time.Time
+	cancel  context.CancelFunc
+
+	perm *permMsg // pending permission request, nil when none
+}
+
+func newChatModel(r *REPL) chatModel {
+	ta := textarea.New()
+	ta.Placeholder = "Ask harness to investigate, write a detection, or run a command…"
+	ta.Prompt = "› "
+	ta.ShowLineNumbers = false
+	ta.CharLimit = 0
+	ta.MaxHeight = 6
+	ta.SetHeight(1)
+	// Keep the input visually flat; the surrounding box provides the frame.
+	ta.FocusedStyle.Base = lipgloss.NewStyle()
+	ta.BlurredStyle.Base = lipgloss.NewStyle()
+	ta.FocusedStyle.CursorLine = lipgloss.NewStyle()
+	ta.FocusedStyle.Prompt = r.styles.Prompt
+	ta.BlurredStyle.Prompt = r.styles.Hint
+	ta.FocusedStyle.Placeholder = r.styles.Hint
+	ta.BlurredStyle.Placeholder = r.styles.Hint
+	// Enter submits; explicit newlines come from ctrl+j or alt+enter.
+	ta.KeyMap.InsertNewline = key.NewBinding(key.WithKeys("ctrl+j", "alt+enter"))
+	ta.Focus()
+
+	sp := spinner.New()
+	sp.Spinner = spinner.Spinner{Frames: spinnerFrames, FPS: time.Second / 10}
+	sp.Style = r.styles.Spinner
+
+	m := chatModel{
+		repl:   r,
+		styles: r.styles,
+		md:     newMarkdownRenderer(80),
+		ta:     ta,
+		sp:     sp,
+		phase:  phaseThinking,
+	}
+	m.blocks = append(m.blocks, m.banner())
+	return m
+}
+
+func (m chatModel) Init() tea.Cmd {
+	return textarea.Blink
+}
+
+func (m chatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		return m.resize(msg.Width, msg.Height)
+
+	case tea.KeyMsg:
+		return m.onKey(msg)
+
+	case tea.MouseMsg:
+		var cmd tea.Cmd
+		m.vp, cmd = m.vp.Update(msg)
+		return m, cmd
+
+	case assistantMsg:
+		m.phase = phaseThinking
+		m.repl.Session.Add(session.Entry{Kind: session.KindAssistant, Content: string(msg)})
+		m.append("\n" + m.md.render(string(msg)))
+		return m, nil
+
+	case toolCallMsg:
+		m.phase = phaseFor(msg.name, msg.summary)
+		m.repl.Session.Add(session.Entry{Kind: session.KindToolCall, Tool: msg.name, Content: msg.summary})
+		line := "  " + m.styles.ToolGlyph.Render("●") + " " + m.styles.ToolCall.Render(msg.name)
+		if s := oneLine(msg.summary, 96); s != "" {
+			line += "  " + m.styles.ToolMeta.Render(s)
+		}
+		m.append(line)
+		return m, nil
+
+	case toolResultMsg:
+		m.phase = phaseThinking
+		m.repl.Session.Add(session.Entry{Kind: session.KindToolResult, Tool: msg.name, Content: msg.content, IsError: msg.isErr})
+		m.append(m.renderResult(msg.content, msg.isErr))
+		return m, nil
+
+	case deniedMsg:
+		m.append("  " + m.styles.Denied.Render("✗ denied") + "  " + m.styles.ToolMeta.Render(msg.name))
+		return m, nil
+
+	case permMsg:
+		m.perm = &msg
+		m.ta.Blur()
+		return m, nil
+
+	case turnDoneMsg:
+		return m.onTurnDone(msg)
+
+	case spinner.TickMsg:
+		if !m.running {
+			return m, nil
+		}
+		var cmd tea.Cmd
+		m.sp, cmd = m.sp.Update(msg)
+		return m, cmd
+	}
+
+	// Default: feed the input box (typing, cursor blink, etc.).
+	var cmd tea.Cmd
+	m.ta, cmd = m.ta.Update(msg)
+	return m, cmd
+}
+
+// onKey routes key presses, accounting for the permission modal and the
+// running/idle distinction.
+func (m chatModel) onKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// Permission modal captures the keyboard until answered.
+	if m.perm != nil {
+		switch strings.ToLower(msg.String()) {
+		case "y", "enter":
+			m.answerPerm(true, false)
+		case "a":
+			m.answerPerm(true, true)
+		case "n", "esc", "ctrl+c":
+			m.answerPerm(false, false)
+		}
+		return m, nil
+	}
+
+	switch msg.String() {
+	case "ctrl+c":
+		if m.running {
+			m.interrupt()
+			return m, nil
+		}
+		return m, tea.Quit
+	case "esc":
+		if m.running {
+			m.interrupt()
+		}
+		return m, nil
+	case "enter":
+		return m.submit()
+	case "pgup", "pgdown", "ctrl+u", "ctrl+d":
+		var cmd tea.Cmd
+		m.vp, cmd = m.vp.Update(msg)
+		return m, cmd
+	}
+
+	var cmd tea.Cmd
+	m.ta, cmd = m.ta.Update(msg)
+	m.relayout()
+	return m, cmd
+}
+
+// submit sends the current input: starting a turn when idle, or queueing it when
+// the agent is busy.
+func (m chatModel) submit() (tea.Model, tea.Cmd) {
+	input := strings.TrimSpace(m.ta.Value())
+	if input == "" {
+		return m, nil
+	}
+	if input == "exit" || input == "quit" {
+		return m, tea.Quit
+	}
+	m.ta.Reset()
+	m.relayout()
+	m.repl.Session.Add(session.Entry{Kind: session.KindUser, Content: input})
+
+	if m.running {
+		m.queue = append(m.queue, input)
+		m.append(m.styles.User.Render("› "+oneLine(input, 96)) + "  " + m.styles.Queued.Render("(queued)"))
+		return m, nil
+	}
+	m.append(m.styles.User.Render("› " + input))
+	return m.startTurn(input)
+}
+
+// startTurn launches the agent for one user message in a goroutine, forwarding
+// events back as messages and reporting completion via turnDoneMsg.
+func (m chatModel) startTurn(input string) (tea.Model, tea.Cmd) {
+	ctx, cancel := context.WithCancel(context.Background())
+	m.cancel = cancel
+	m.running = true
+	m.phase = phaseThinking
+	m.started = time.Now()
+
+	p := m.repl.program
+	history := m.history
+	ev := m.repl.events(p)
+	go func() {
+		updated, err := m.repl.Agent.Run(ctx, history, input, ev)
+		p.Send(turnDoneMsg{history: updated, err: err})
+	}()
+	return m, m.sp.Tick
+}
+
+// onTurnDone records the result and either starts the next queued message or
+// returns to idle.
+func (m chatModel) onTurnDone(msg turnDoneMsg) (tea.Model, tea.Cmd) {
+	m.running = false
+	m.cancel = nil
+	m.history = msg.history
+	if msg.err != nil {
+		if errors.Is(msg.err, context.Canceled) {
+			m.append("  " + m.styles.Denied.Render("⊘ interrupted"))
+		} else {
+			m.append("  " + m.styles.Error.Render("error: "+msg.err.Error()))
+		}
+	}
+	if len(m.queue) > 0 {
+		next := m.queue[0]
+		m.queue = m.queue[1:]
+		m.append(m.styles.User.Render("› " + next))
+		return m.startTurn(next)
+	}
+	return m, nil
+}
+
+// interrupt cancels the in-flight turn and resolves any pending permission
+// request so the agent goroutine cannot deadlock.
+func (m *chatModel) interrupt() {
+	if m.perm != nil {
+		m.perm.reply <- false
+		m.perm = nil
+		m.ta.Focus()
+	}
+	if m.cancel != nil {
+		m.cancel()
+	}
+}
+
+// answerPerm replies to the pending permission request, optionally allowlisting
+// the tool for the rest of the session.
+func (m *chatModel) answerPerm(allow, always bool) {
+	if m.perm == nil {
+		return
+	}
+	if allow && always {
+		m.repl.Gate.AllowTool(m.perm.name)
+	}
+	m.perm.reply <- allow
+	if !allow {
+		m.append("  " + m.styles.Denied.Render("✗ denied") + "  " + m.styles.ToolMeta.Render(m.perm.name))
+	}
+	m.perm = nil
+	m.ta.Focus()
+}
+
+// --- rendering ---
+
+func (m chatModel) View() string {
+	if !m.ready {
+		return "starting harness…"
+	}
+	box := m.styles.InputBox
+	if m.running {
+		box = m.styles.InputBoxBusy
+	}
+	return lipgloss.JoinVertical(lipgloss.Left,
+		m.vp.View(),
+		m.statusLine(),
+		box.Width(m.width-2).Render(m.ta.View()),
+		m.footer(),
+	)
+}
+
+// statusLine sits just above the input: the activity spinner while running, the
+// permission request when one is pending, or a blank spacer when idle.
+func (m chatModel) statusLine() string {
+	if m.perm != nil {
+		line := "  " + m.styles.Denied.Render("permission needed") + "  " + m.styles.ToolCall.Render(m.perm.name)
+		if s := oneLine(m.perm.summary, 72); s != "" {
+			line += "  " + m.styles.ToolMeta.Render(s)
+		}
+		return line
+	}
+	if !m.running {
+		return ""
+	}
+	line := "  " + m.sp.View() + " " + m.styles.SpinnerLabel.Render(m.phase)
+	if e := time.Since(m.started).Round(time.Second); e >= time.Second {
+		line += " " + m.styles.Hint.Render("· "+e.String())
+	}
+	line += "  " + m.styles.Hint.Render("esc to interrupt")
+	if n := len(m.queue); n > 0 {
+		line += "  " + m.styles.Queued.Render(fmt.Sprintf("· %d queued", n))
+	}
+	return line
+}
+
+func (m chatModel) footer() string {
+	if m.perm != nil {
+		return "  " + m.styles.Hint.Render("[y]es  ·  [n]o  ·  [a]lways allow this tool")
+	}
+	hint := "enter send · ctrl+j newline · ↑/pgup scroll · ctrl+c quit"
+	if m.running {
+		hint = "type to queue · enter send · esc interrupt · ctrl+c quit"
+	}
+	return "  " + m.styles.Hint.Render(hint)
+}
+
+// banner is the curated session header, rendered as the first transcript block.
+func (m chatModel) banner() string {
+	var b strings.Builder
+	b.WriteString("  " + m.styles.BannerTag.Render("harness") + "  " +
+		m.styles.Hint.Render("security detection & response · "+m.repl.Model))
+	if p := m.repl.Session.Path(); p != "" {
+		b.WriteString("\n  " + m.styles.Hint.Render("transcript · "+p))
+	}
+	b.WriteString("\n  " + m.styles.Hint.Render(`type a request, "exit" to quit`))
+	b.WriteString("\n  " + m.styles.Rule.Render(strings.Repeat("─", 52)))
+	return b.String()
+}
+
+// renderResult formats a tool result as a dim, gutter-framed block.
+func (m chatModel) renderResult(content string, isErr bool) string {
+	style := m.styles.Result
+	gutter := m.styles.Gutter.Render("  │ ")
+	if isErr {
+		style = m.styles.ResultErr
+		gutter = m.styles.Error.Render("  │ ")
+	}
+	lines := previewLines(content, 6)
+	out := make([]string, 0, len(lines))
+	for _, ln := range lines {
+		out = append(out, gutter+style.Render(ln))
+	}
+	return strings.Join(out, "\n")
+}
+
+// append adds a rendered block to the transcript and scrolls to it.
+func (m *chatModel) append(block string) {
+	m.blocks = append(m.blocks, block)
+	m.refreshViewport()
+}
+
+func (m *chatModel) refreshViewport() {
+	if !m.ready {
+		return
+	}
+	m.vp.SetContent(strings.Join(m.blocks, "\n"))
+	m.vp.GotoBottom()
+}
+
+// resize recomputes the layout for a new terminal size.
+func (m chatModel) resize(w, h int) (tea.Model, tea.Cmd) {
+	m.width, m.height = w, h
+	m.md = newMarkdownRenderer(w - 4)
+	m.ta.SetWidth(w - 4)
+	if !m.ready {
+		m.vp = viewport.New(w, m.viewportHeight())
+		m.ready = true
+	}
+	m.relayout()
+	return m, nil
+}
+
+// relayout adjusts the input height to its content and resizes the viewport to
+// fill the remaining space.
+func (m *chatModel) relayout() {
+	if !m.ready {
+		return
+	}
+	lines := m.ta.LineCount()
+	if lines < 1 {
+		lines = 1
+	}
+	if lines > 6 {
+		lines = 6
+	}
+	m.ta.SetHeight(lines)
+	m.vp.Width = m.width
+	m.vp.Height = m.viewportHeight()
+	m.refreshViewport()
+}
+
+// viewportHeight returns the rows available for the transcript after reserving
+// space for the status line, bordered input box, and footer.
+func (m chatModel) viewportHeight() int {
+	lines := 1
+	if m.ready {
+		if lc := m.ta.LineCount(); lc > lines {
+			lines = lc
+		}
+		if lines > 6 {
+			lines = 6
+		}
+	}
+	inputBox := lines + 2                       // rounded border top and bottom
+	h := m.height - inputBox - 1 /*status*/ - 1 /*footer*/
+	if h < 3 {
+		h = 3
+	}
+	return h
+}
