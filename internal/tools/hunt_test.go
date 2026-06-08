@@ -20,7 +20,9 @@ func newHuntRC(t *testing.T) (*RunContext, *brain.Mem, string) {
 	if err != nil {
 		t.Fatalf("OpenHunt: %v", err)
 	}
-	return NewHuntContext("dev", huntID, bc, policy.Default()), mem, huntID
+	rc := NewRunContext("dev", "", bc, governance.NewLedger(), policy.Default())
+	rc.SetHunt(huntID, "q")
+	return rc, mem, huntID
 }
 
 func TestRecordFindingTool(t *testing.T) {
@@ -64,7 +66,7 @@ func TestRecordIntelTool(t *testing.T) {
 
 func TestStoreHuntRejectsUnbackedFinding(t *testing.T) {
 	rc, _, _ := newHuntRC(t)
-	st := &StoreHunt{RC: rc, Question: "q"}
+	st := &StoreHunt{RC: rc}
 	res := run(t, st, map[string]any{
 		"outcome":  brain.HuntConfirmed,
 		"findings": []map[string]any{{"text": "no evidence cited"}},
@@ -82,7 +84,7 @@ func TestStoreHuntHappyPath(t *testing.T) {
 	})
 	fid := strings.TrimSpace(strings.TrimPrefix(strings.SplitN(fres.Content, "—", 2)[0], "recorded finding "))
 
-	st := &StoreHunt{RC: rc, Question: "q"}
+	st := &StoreHunt{RC: rc}
 	res := run(t, st, map[string]any{
 		"outcome":  brain.HuntConfirmed,
 		"findings": []map[string]any{{"text": "fact confirmed", "evidence": []string{fid}}},

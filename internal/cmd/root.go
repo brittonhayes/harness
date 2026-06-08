@@ -6,9 +6,12 @@ import (
 	"os"
 
 	"github.com/brittonhayes/vala/internal/agent"
+	"github.com/brittonhayes/vala/internal/brain"
 	"github.com/brittonhayes/vala/internal/config"
+	"github.com/brittonhayes/vala/internal/governance"
 	"github.com/brittonhayes/vala/internal/llm"
 	"github.com/brittonhayes/vala/internal/permission"
+	"github.com/brittonhayes/vala/internal/policy"
 	"github.com/brittonhayes/vala/internal/session"
 	"github.com/brittonhayes/vala/internal/tool"
 	"github.com/brittonhayes/vala/internal/tools"
@@ -26,22 +29,19 @@ var (
 var rootCmd = &cobra.Command{
 	Use:   "vala",
 	Short: "Agentic security harness for threat hunting, detection, and response",
-	Long: `vala is an agentic security harness that orchestrates a Notion-backed brain
-to hunt threats, build detections, and work alerts.
+	Long: `vala is a single agentic security harness: one interactive session with a
+toolbox the agent composes to hunt threats, record and link threat
+intelligence, author and validate detections, and work alerts — documenting it
+all in a Notion-backed brain.
 
-Rather than statically searching a SIEM by hand, vala explores: it investigates
-a threat question against a hypothesis, stores the hunt and any threat
-intelligence it surfaces in Notion as first-class artifacts, connects intel,
-hunts, alerts, and detections into one graph, and feeds what it learns back into
-detection development.
+There is one surface and one set of tools. Workflows are not separate commands;
+they are things you ask the agent to do, and it reaches for the right
+primitives: open_hunt to investigate a question, record_intel/link_artifacts to
+build the intel graph, the detection-authoring tools to write Sigma rules, and
+open_case to work an alert through the governed response loop.
 
-  vala hunt     explore a threat question and store the hunt
-  vala intel    record and link threat intelligence
-  vala respond  work an alert through the governed response loop
-  vala run      author and validate Sigma detections non-interactively
-
-Run with no arguments to start an interactive session, or use "vala run"
-for a single non-interactive task.`,
+Run with no arguments to start an interactive session, or use "vala run" for a
+single non-interactive task.`,
 	SilenceUsage:  true,
 	SilenceErrors: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -70,7 +70,7 @@ func Execute() {
 func init() {
 	rootCmd.PersistentFlags().StringVar(&flagModel, "model", "", "Anthropic model ID (overrides config)")
 	rootCmd.PersistentFlags().StringVar(&flagPermission, "permission", "", "permission mode: ask | allow | deny")
-	rootCmd.AddCommand(runCmd, respondCmd, huntCmd, intelCmd, harnessCmd, versionCmd)
+	rootCmd.AddCommand(runCmd, harnessCmd, versionCmd)
 }
 
 // built bundles the constructed dependencies for a command.
@@ -83,8 +83,8 @@ type built struct {
 }
 
 // resolveConfig loads config for the current directory and applies persistent
-// flag overrides. It does not construct the LLM client, so commands that only
-// touch the brain (e.g. `vala intel`) can run without an API key.
+// flag overrides. It does not construct the LLM client, so callers that only
+// touch the brain can run without an API key.
 func resolveConfig() (config.Config, string, error) {
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -104,7 +104,8 @@ func resolveConfig() (config.Config, string, error) {
 }
 
 // build resolves config + flags and constructs the shared dependencies,
-// including the LLM client (which requires an API key).
+// including the LLM client (which requires an API key), and assembles the one
+// unified toolbox the harness runs with.
 func build() (*built, error) {
 	cfg, cwd, err := resolveConfig()
 	if err != nil {
@@ -114,8 +115,19 @@ func build() (*built, error) {
 	if err != nil {
 		return nil, err
 	}
-	registry := tools.Default(cwd)
 	gate := permission.New(permission.Parse(cfg.Permission), cfg.Allowlist)
+
+	pol, err := policy.Load(cwd)
+	if err != nil {
+		return nil, fmt.Errorf("load policy: %w", err)
+	}
+
+	// The session RunContext the hunt/intel tools write through. open_hunt sets
+	// its active hunt at runtime; the ledger is unused on this single-phase path
+	// (governed actions run inside their own context within open_case).
+	rc := tools.NewRunContext(cfg.Env, "", brain.New(brainStore(cfg, cwd)), governance.NewLedger(), pol)
+	cr := &caseRunner{cfg: cfg, cwd: cwd, client: client, gate: gate, policy: pol}
+	registry := tools.Toolbox(cwd, rc, cfg.SlackWebhook, cr)
 
 	return &built{cfg: cfg, cwd: cwd, client: client, registry: registry, gate: gate}, nil
 }

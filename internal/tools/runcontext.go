@@ -9,18 +9,22 @@ import (
 	"github.com/brittonhayes/vala/internal/policy"
 )
 
-// RunContext is the per-incident state shared by the governance control/case
-// tools (record_evidence, propose_action, submit_for_approval, write_case_page)
-// and read by the respond engine. One RunContext exists per `vala respond` run.
+// RunContext is the per-run state shared by the case and hunt brain tools
+// (record_evidence, propose_action, submit_for_approval, write_case_page,
+// record_finding, store_hunt, …). The harness session holds one for hunt/intel
+// work; each governed case opens its own inside the respond engine.
 type RunContext struct {
 	Env    string
 	CaseID string
-	// HuntID is set instead of CaseID when this RunContext drives a `vala hunt`
-	// run. A RunContext is either a case run or a hunt run, never both.
-	HuntID string
-	Brain  *brain.Client
-	Ledger *governance.Ledger
-	Policy *policy.Set
+	// HuntID is set instead of CaseID when this RunContext drives a hunt. In the
+	// unified harness it is set at runtime by the open_hunt tool; record_finding
+	// and store_hunt refuse to run until it is. HuntQuestion carries the question
+	// open_hunt opened the hunt with, so store_hunt can title the page.
+	HuntID       string
+	HuntQuestion string
+	Brain        *brain.Client
+	Ledger       *governance.Ledger
+	Policy       *policy.Set
 
 	// Notifier sends comms for slack_notify; nil falls back to a no-op record.
 	Notifier Notifier
@@ -34,7 +38,8 @@ type RunContext struct {
 	huntPageURL string // set by store_hunt
 }
 
-// NewRunContext builds a RunContext for a governed case (`vala respond`) run.
+// NewRunContext builds a RunContext. caseID is set for a governed case; the
+// harness session passes an empty caseID and sets a hunt later via SetHunt.
 func NewRunContext(env, caseID string, b *brain.Client, led *governance.Ledger, pol *policy.Set) *RunContext {
 	return &RunContext{
 		Env:     env,
@@ -47,20 +52,13 @@ func NewRunContext(env, caseID string, b *brain.Client, led *governance.Ledger, 
 	}
 }
 
-// NewHuntContext builds a RunContext for a `vala hunt` run. It carries a HuntID
-// instead of a CaseID; the ledger it creates is never settled (hunting has no
-// approval/execute phase) and is present only so the shared governed tools have
-// the state they expect.
-func NewHuntContext(env, huntID string, b *brain.Client, pol *policy.Set) *RunContext {
-	return &RunContext{
-		Env:     env,
-		HuntID:  huntID,
-		Brain:   b,
-		Ledger:  governance.NewLedger(),
-		Policy:  pol,
-		actions: map[string]*brain.Action{},
-		rowIDs:  map[string]string{},
-	}
+// SetHunt records the active hunt opened by the open_hunt tool so the hunt
+// brain tools (record_finding, store_hunt) have a hunt to write to.
+func (rc *RunContext) SetHunt(huntID, question string) {
+	rc.mu.Lock()
+	defer rc.mu.Unlock()
+	rc.HuntID = huntID
+	rc.HuntQuestion = question
 }
 
 func (rc *RunContext) addEvidence(e brain.Evidence) {

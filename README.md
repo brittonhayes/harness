@@ -49,41 +49,32 @@ go install github.com/brittonhayes/vala/cmd/vala@latest
 export ANTHROPIC_API_KEY=sk-ant-...
 ```
 
-Start an interactive session and ask it to do detection work:
+There is one surface: an interactive session with a toolbox. Start it and ask it
+to do the work — hunt, record intel, author detections, or work an alert:
 
 ```sh
 vala
 ```
 
-Hunt a threat question and store the hunt in the brain:
-
-```sh
-vala hunt "did anyone disable GuardDuty in the last 24h?"
-
-# promote a confirmed hunt straight into a Sigma detection
-vala hunt --promote "is someone exfiltrating data via S3 object copies?"
+```
+› hunt whether anyone disabled GuardDuty in the last 24h, and store the hunt
+› record the TTP attack.t1562.001 and link it to that hunt
+› author a Sigma rule for an attacker disabling GuardDuty, with a runbook and tests
+› work the alert in tests/ops/sample_alert.json
 ```
 
-Record and connect threat intelligence (no API key needed):
+The agent reaches for the right primitives: `open_hunt` to investigate a
+question, `record_intel`/`link_artifacts` to build the intel graph, the
+detection-authoring tools to write Sigma rules, and `open_case` to drive an alert
+through the governed response loop.
 
-```sh
-vala intel add --kind ttp --value attack.t1562.001 --description "GuardDuty disruption"
-vala intel link <hunt-id> --relation intel --to <intel-id>
-```
-
-Or run a one-shot detection task non-interactively:
+Run a one-shot task non-interactively (same toolbox, no TTY):
 
 ```sh
 vala run "validate and test every rule in my detections directory, and report failures"
 
 vala run --yes "author a Sigma rule for an attacker disabling GuardDuty: \
   study the reference rules first, add a runbook and two tests, then validate it"
-```
-
-Work an alert through the governed response loop:
-
-```sh
-vala respond tests/ops/sample_alert.json
 ```
 
 Replay the adversarial safety harness (no API key needed):
@@ -101,19 +92,20 @@ Common flags: `--model <id>`, `--permission ask|allow|deny`.
 
 ### Hunt threats
 
-`vala hunt "<question>"` runs a hypothesis-driven hunt: vala states a hypothesis for
-the question, explores read-only data sources (`log_search`, `read`, `grep`, `glob`),
-and records each fact as an immutable **Finding** pointer. When it has enough to judge
-the hypothesis it stores the hunt — question, hypothesis, findings, and a **Confirmed
-/ Refuted / Inconclusive** verdict — in Notion. Findings follow the same evidence
+Ask vala to hunt a question and it runs a hypothesis-driven hunt: `open_hunt`
+states the question, then it explores read-only data sources (`log_search`,
+`read`, `grep`, `glob`) and records each fact as an immutable **Finding** pointer
+with `record_finding`. When it has enough to judge the hypothesis it calls
+`store_hunt` — question, hypothesis, findings, and a **Confirmed / Refuted /
+Inconclusive** verdict — into Notion. Findings follow the same evidence
 discipline as a case: every declarative finding must cite a pointer or be marked a
 hypothesis, or the hunt page is rejected.
 
 Along the way it records **Intelligence** (`record_intel`) — indicators, TTPs, actors,
 and narrative writeups — and links artifacts (`link_artifacts`) so intel, hunts,
-alerts, and detections connect to each other. A hunt that confirms its hypothesis can
-be `--promote`d straight into detection authoring: vala writes a Sigma rule for the
-behavior it found and links the detection back to the hunt.
+alerts, and detections connect to each other. A hunt that confirms its hypothesis
+flows straight into detection authoring: vala writes a Sigma rule for the behavior
+it found and links the detection back to the hunt with `link_artifacts`.
 
 That's the difference from a static SIEM search: vala works a question, records the
 answer, and feeds it into detections.
@@ -143,8 +135,9 @@ its own.** Point it at your directory with `detections_dir` (default `detections
 
 ### Respond to alerts
 
-`vala respond <alert.json>` drives an alert through a **phase-separated governance
-loop** where each phase exposes the agent a smaller set of tools:
+Hand vala an alert and it calls `open_case`, which drives the alert through a
+**phase-separated governance loop** where each phase exposes the agent a smaller
+set of tools:
 
 ```
 plan ─► evidence ─► propose ─► approval ─► execute ─► report
@@ -168,7 +161,7 @@ action.
 
 ## How safety is enforced
 
-The point of `vala respond` is that you can trust an autonomous agent with response
+The point of `open_case` is that you can trust an autonomous agent with response
 work. That trust comes from three code-level controls, not from asking the model
 nicely in a prompt:
 
@@ -250,7 +243,8 @@ than silently passing.
 
 ## Tools
 
-Detection-authoring tools:
+The agent works from one toolbox; the tables below group it by what each tool is
+for, not by separate commands. Detection-authoring tools:
 
 | Tool | Read-only | Purpose |
 |------|-----------|---------|
@@ -272,19 +266,22 @@ The field-editing tools all funnel through one load → mutate → validate → 
 pipeline: they change a single field, keep the file's comments intact, and report
 only what changed plus the validation status — never the whole file.
 
-Hunting tools (used by `vala hunt`):
+Hunting & intel tools:
 
 | Tool | Class | Purpose |
 |------|-------|---------|
+| `open_hunt` | case_write | Open a hunt and make it the session's active hunt. |
 | `record_finding` | case_write | Append an immutable Finding pointer to the hunt. |
 | `record_intel` | case_write | Record threat intelligence (indicator/ttp/actor/narrative). |
 | `link_artifacts` | case_write | Connect brain rows (intel ↔ hunts ↔ alerts ↔ detections). |
 | `store_hunt` | case_write | Write the hunt narrative + verdict (finding-linted). |
 
-Incident-response tools (used by `vala respond`, governed per phase):
+Incident-response tools — `open_case` enters the governed loop, which exposes the
+rest per phase:
 
 | Tool | Class | Purpose |
 |------|-------|---------|
+| `open_case` | case_write | Work an alert through the governed loop and return a case summary. |
 | `log_search` | read | Query logs for evidence (mock-capable). |
 | `record_evidence` | case_write | Append an immutable Evidence pointer. |
 | `propose_action` | control | Propose a write action for approval (citing evidence). |
@@ -328,8 +325,8 @@ Settings layer (lowest priority first): built-in defaults →
 ```
 
 `env` selects the policy environment (`dev`/`prod`). Notion database IDs enable real
-Notion writes for `vala respond`, `vala hunt`, and `vala intel`; leave them empty to
-run the brain in local mode. Session transcripts are written to
+Notion writes for hunts, cases, and intel; leave them empty to run the brain in
+local mode (artifacts are printed instead). Session transcripts are written to
 `~/.local/share/vala/sessions/`.
 
 ## Design
