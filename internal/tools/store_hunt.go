@@ -19,8 +19,7 @@ var storeHuntDescription string
 // run's recorded findings, lints the page, and refuses to write if any finding
 // is unsupported. Class: case_write.
 type StoreHunt struct {
-	RC       *RunContext
-	Question string
+	RC *RunContext
 }
 
 func (t *StoreHunt) Name() string        { return "store_hunt" }
@@ -75,7 +74,7 @@ func (t *StoreHunt) Run(ctx context.Context, input json.RawMessage) (tool.Result
 
 	page := brain.HuntPage{
 		HuntID:     t.RC.HuntID,
-		Question:   t.Question,
+		Question:   t.RC.HuntQuestion,
 		Hypothesis: in.Hypothesis,
 		Status:     in.Outcome,
 		Findings:   in.Findings,

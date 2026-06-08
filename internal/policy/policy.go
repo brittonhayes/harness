@@ -66,7 +66,7 @@ func Default() *Set {
 			},
 			"case_write": {
 				"open_case", "record_evidence", "write_case_page",
-				"record_finding", "store_hunt", "record_intel", "link_artifacts",
+				"open_hunt", "record_finding", "store_hunt", "record_intel", "link_artifacts",
 			},
 			"control":        {"propose_action", "submit_for_approval"},
 			"action_execute": {"slack_notify", "bash", "write", "edit", "ntn"},
