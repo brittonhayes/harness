@@ -1,17 +1,15 @@
 # vala
 
-An agentic threat-hunting system — as a single Go binary.
+An agentic threat-hunting system in a single Go binary.
 
-A SIEM is something you search by hand. vala works the other way: it runs one
-loop — **scope a hypothesis, hunt it, conclude, automate** — records every step
-in Notion, and leaves a detection behind. Authoring a detection is not a separate
-job; it is the *deliverable of a confirmed hunt*. Hand it an alert and it also
-investigates, proposes actions, and writes an auditable case — without taking a
-destructive action you didn't approve.
+vala runs one loop: scope a hypothesis, hunt it, reach a verdict, and write the
+detection a confirmed hunt warrants. Every step is recorded in Notion. Hand it an
+alert instead and it investigates, proposes actions, and writes an auditable
+case, executing nothing you haven't approved.
 
-It runs on Anthropic's Claude and needs no external detection toolchain. Sigma
-rules are validated and unit-tested natively and offline, inside the binary — no
-`sigma-cli`, no `yq`, no Python.
+It runs on Anthropic's Claude and needs no external detection toolchain: Sigma
+rules are validated and unit-tested offline, inside the binary — no `sigma-cli`,
+no `yq`, no Python.
 
 ## Quickstart
 
@@ -20,8 +18,8 @@ go install github.com/brittonhayes/vala/cmd/vala@latest
 export ANTHROPIC_API_KEY=sk-ant-...
 ```
 
-There is one surface: an interactive session with a toolbox. Start it and ask it
-to do the work:
+vala has a single surface: an interactive session. Start it and describe the
+work:
 
 ```sh
 vala
@@ -48,37 +46,35 @@ Common flags: `--model <id>`, `--permission ask|allow|deny`, `--yes`.
 
 ## The hunt loop
 
-vala's spine is one loop, mapped to the way mature hunt teams work (Sqrrl's
-Hunting Loop, Splunk PEAK, TaHiTI). See
-[`docs/threat-hunting-system.md`](docs/threat-hunting-system.md) for the research
-and rationale.
+vala runs one loop, following the shape established hunt frameworks share
+(Sqrrl's Hunting Loop, Splunk PEAK, TaHiTI). See
+[`docs/threat-hunting-system.md`](docs/threat-hunting-system.md) for the
+rationale.
 
-**1 · Scope.** Phrase the hypothesis with ABLE — the testable adversary
-**B**ehavior and the data-source **L**ocation it would appear in. `queue_hunt`
-parks a trigger (intel, a hunch, a fresh CVE, a past incident) on a prioritized
-**backlog** so nothing is lost.
+**1 · Scope.** State the hypothesis with ABLE — the testable adversary
+**B**ehavior and the data-source **L**ocation where it would appear. `queue_hunt`
+records a trigger (intel, a hunch, a fresh CVE, a past incident) on a prioritized
+**backlog**.
 
 **2 · Hunt.** `open_hunt` starts a hypothesis-driven hunt. vala explores
-read-only data sources and records each fact as an immutable Finding pointer, and
-records intelligence (indicators, TTPs, actors) as first-class artifacts.
+read-only data sources, recording each fact as an immutable Finding pointer and
+each indicator, TTP, or actor as a first-class artifact.
 
-**3 · Conclude.** `store_hunt` writes the narrative page with a Confirmed /
-Refuted / Inconclusive verdict — every declarative finding must cite a finding ID
-or the page is rejected. A Refuted/Inconclusive verdict is a real result.
+**3 · Conclude.** `store_hunt` writes the narrative page with a Confirmed,
+Refuted, or Inconclusive verdict. Every declarative finding must cite a Finding
+ID, or the page is rejected.
 
-**4 · Automate — the deliverable.** A *confirmed* hunt's deliverable is a
-detection. vala authors a Sigma rule for the proven behavior — study → author →
-validate → test → document — editing one field at a time (preserving comments and
-key order), validating against the official Sigma JSON schema offline, running
-each rule's inline `tests:` through a built-in evaluation engine, and linking it
-back to the hunt. It never forces a low-value rule onto a refuted hunt. vala ships
-no detections of its own — point it at your directory with `detections_dir`
-(default `detections`).
+**4 · Automate.** A confirmed hunt produces a detection. vala authors a Sigma
+rule for the proven behavior — study, author, validate, test, document — editing
+one field at a time to preserve comments and key order, checking it against the
+official Sigma JSON schema offline, and running its inline `tests:` through a
+built-in evaluation engine before linking it back to the hunt. A refuted hunt
+produces none. vala ships no detections of its own; point it at your directory
+with `detections_dir` (default `detections`).
 
-Everything is linked in Notion — backlog ↔ intel ↔ hunts ↔ detections — into one
-graph, so coverage and gaps become measurable.
+In Notion, backlog, intel, hunts, and detections form one connected graph.
 
-### Responding to alerts (secondary)
+### Responding to alerts
 
 Hand it an alert and `open_case` drives it through a phase-separated governance
 loop:
