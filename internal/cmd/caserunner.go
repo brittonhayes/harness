@@ -71,9 +71,8 @@ func formatCaseSummary(res *respond.Result, store brain.Notion) string {
 // otherwise an in-memory store for local runs. Any of the case-brain, hunts, or
 // intel databases being set is enough to treat the workspace as configured.
 func brainStore(cfg config.Config, cwd string) brain.Notion {
-	n := cfg.Notion
-	if n.Cases != "" || n.Hunts != "" || n.Intel != "" {
-		return &brain.NTN{Dir: cwd, DBs: n}
+	if brainConfigured(cfg) {
+		return &brain.NTN{Dir: cwd, DBs: cfg.Notion}
 	}
 	return brain.NewMem()
 }

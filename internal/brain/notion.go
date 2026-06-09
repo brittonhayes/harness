@@ -185,21 +185,6 @@ func (n *NTN) bin() string {
 	return "ntn"
 }
 
-func (n *NTN) run(ctx context.Context, args ...string) (string, error) {
-	if _, err := exec.LookPath(n.bin()); err != nil {
-		return "", fmt.Errorf("ntn CLI not available: %w", err)
-	}
-	cmd := exec.CommandContext(ctx, n.bin(), args...)
-	cmd.Dir = n.Dir
-	var out bytes.Buffer
-	cmd.Stdout = &out
-	cmd.Stderr = &out
-	if err := cmd.Run(); err != nil {
-		return out.String(), fmt.Errorf("ntn %v: %w", args, err)
-	}
-	return out.String(), nil
-}
-
 // runOut runs ntn capturing stdout separately from stderr, so JSON responses
 // parse cleanly and the error carries ntn's diagnostic text.
 func (n *NTN) runOut(ctx context.Context, args ...string) ([]byte, error) {

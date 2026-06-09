@@ -18,6 +18,19 @@ go install github.com/brittonhayes/vala/cmd/vala@latest
 export ANTHROPIC_API_KEY=sk-ant-...
 ```
 
+Provision the Notion-backed brain once, so your hunts, intel, evidence, and
+detections persist instead of living in an ephemeral in-memory store. This needs
+an authenticated [Notion CLI](https://github.com/makenotion/ntn) (`ntn login`):
+
+```sh
+vala init --parent <notion-page-id>
+```
+
+`init` creates the brain's databases under that page and writes their data-source
+IDs into `.vala.json`. It is idempotent — re-running verifies and reuses the
+existing databases rather than duplicating them. Until you run it, vala warns on
+startup that it is in ephemeral in-memory mode (suppress with `--no-init-prompt`).
+
 vala has a single surface: an interactive session. Start it and describe the
 work:
 
@@ -169,11 +182,13 @@ file. With no MCP server configured, vala has no remote evidence source and can
 only reason over local files.
 
 `env` selects the policy environment (`dev`/`prod`). The `notion` values are
-**data-source IDs** (resolve a database ID with `ntn datasources resolve <id>`);
-set them to enable real Notion reads and writes, or leave them empty to run in
-local mode. vala reads each data source's schema and types properties to match,
-so each data source's property names should match the field keys vala writes
-(`hunt_id`, `status`, `started_at`, relations like `hunts`/`detections`, …).
+**data-source IDs**; the easiest way to populate them is `vala init`, which
+provisions the databases with the exact property names and types vala expects and
+writes the IDs here for you. To wire up databases by hand instead, resolve a
+database ID with `ntn datasources resolve <id>` and ensure each data source's
+property names match the field keys vala writes (`hunt_id`, `status`,
+`started_at`, relations like `hunts`/`detections`, …). Leave the IDs empty to run
+in local mode.
 Every non-read-only tool call is gated by `--permission`: `ask` (default) prompts
 per call, `allow` auto-approves for unattended runs, `deny` blocks all writes.
 
