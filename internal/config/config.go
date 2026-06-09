@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 
 	"github.com/brittonhayes/vala/internal/brain"
 )
@@ -25,6 +26,13 @@ type Config struct {
 	DetectionsDir string `json:"detections_dir"`
 	// MaxSteps bounds tool-use iterations per user turn (loop guard).
 	MaxSteps int `json:"max_steps"`
+
+	// ContextWindow is the model's usable context size in tokens, used to decide
+	// when to auto-compact the conversation. 0 disables auto-compaction.
+	ContextWindow int64 `json:"context_window"`
+	// AutoCompactThreshold is the fraction (0..1) of ContextWindow at which vala
+	// optimistically compacts the conversation before continuing. 0 disables it.
+	AutoCompactThreshold float64 `json:"auto_compact_threshold"`
 
 	// Env selects the policy environment for governed runs: dev | prod.
 	Env string `json:"env"`
@@ -67,6 +75,9 @@ func Default() Config {
 		DetectionsDir: "detections",
 		MaxSteps:      50,
 		Env:           "dev",
+
+		ContextWindow:        200000,
+		AutoCompactThreshold: 0.80,
 	}
 }
 
@@ -95,6 +106,16 @@ func Load(cwd string) (Config, error) {
 	}
 	if v := os.Getenv("SLACK_WEBHOOK_URL"); v != "" {
 		cfg.SlackWebhook = v
+	}
+	if v := os.Getenv("VALA_CONTEXT_WINDOW"); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil {
+			cfg.ContextWindow = n
+		}
+	}
+	if v := os.Getenv("VALA_AUTO_COMPACT_THRESHOLD"); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil {
+			cfg.AutoCompactThreshold = f
+		}
 	}
 
 	// Convenience: SCANNER_MCP_URL registers Scanner's data lake as a server

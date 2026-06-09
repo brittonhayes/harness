@@ -28,6 +28,10 @@ type Events struct {
 	OnToolResult func(name, content string, isError bool)
 	// OnPermissionDenied fires when the gate blocks a call.
 	OnPermissionDenied func(name, summary string)
+	// OnUsage fires after each model response with the token counts for that
+	// response. InputTokens covers the full prompt the model just saw (history,
+	// tools, and system prompt), making it a good proxy for context fullness.
+	OnUsage func(inputTokens, outputTokens int64)
 }
 
 func (e Events) assistantText(s string) {
@@ -48,6 +52,11 @@ func (e Events) toolResult(name, content string, isErr bool) {
 func (e Events) denied(name, summary string) {
 	if e.OnPermissionDenied != nil {
 		e.OnPermissionDenied(name, summary)
+	}
+}
+func (e Events) usage(in, out int64) {
+	if e.OnUsage != nil {
+		e.OnUsage(in, out)
 	}
 }
 
@@ -151,6 +160,7 @@ func (a *Agent) loop(ctx context.Context, messages []anthropic.MessageParam, sys
 			return messages, fmt.Errorf("model request failed: %w", err)
 		}
 		messages = append(messages, resp.ToParam())
+		ev.usage(resp.Usage.InputTokens, resp.Usage.OutputTokens)
 
 		var toolResults []anthropic.ContentBlockParamUnion
 		for _, block := range resp.Content {

@@ -46,6 +46,21 @@ vala
 › work the alert in tests/ops/sample_alert.json
 ```
 
+Inside the session, a few slash commands manage the conversation itself rather
+than the agent:
+
+| Command | Effect |
+| --- | --- |
+| `/help` | List the available commands. |
+| `/clear` | Clear the conversation context and transcript, keeping the banner. |
+| `/compact [focus]` | Summarize the conversation into a structured recap and continue with far fewer tokens; optional `focus` text steers the summary. |
+
+vala also compacts optimistically on its own: when a turn's prompt approaches the
+context window (80% by default), it summarizes before continuing so long sessions
+don't run out of room. Tune this with `context_window` / `auto_compact_threshold`
+(or `VALA_CONTEXT_WINDOW` / `VALA_AUTO_COMPACT_THRESHOLD`); set either to `0` to
+disable auto-compaction.
+
 Run a one-shot task non-interactively (same toolbox, no TTY):
 
 ```sh
@@ -147,7 +162,8 @@ and the `1 of` / `all of` quantifiers. The embedded reference rules under
 Settings layer (lowest priority first): built-in defaults →
 `~/.config/vala/config.json` → `./.vala.json` → environment variables
 (`ANTHROPIC_API_KEY`, `VALA_MODEL`, `VALA_PERMISSION`, `VALA_ENV`,
-`SLACK_WEBHOOK_URL`, `SCANNER_MCP_URL`, `SCANNER_API_KEY`).
+`VALA_CONTEXT_WINDOW`, `VALA_AUTO_COMPACT_THRESHOLD`, `SLACK_WEBHOOK_URL`,
+`SCANNER_MCP_URL`, `SCANNER_API_KEY`).
 
 ```json
 {
@@ -155,6 +171,8 @@ Settings layer (lowest priority first): built-in defaults →
   "permission": "ask",
   "detections_dir": "detections",
   "env": "dev",
+  "context_window": 200000,
+  "auto_compact_threshold": 0.8,
   "mcp": [
     { "name": "scanner", "url": "https://<your>.scanner.dev/mcp", "api_key_env": "SCANNER_API_KEY" }
   ],
