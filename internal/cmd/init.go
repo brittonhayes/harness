@@ -18,10 +18,10 @@ var (
 var initCmd = &cobra.Command{
 	Use:   "init",
 	Short: "Provision the Notion-backed brain and write .vala.json",
-	Long: `Init provisions vala's Notion "brain" — the databases that hold alerts,
-cases, evidence, actions, runs, hunts, intel, detections, and the hunting
-backlog — and writes their data-source IDs into .vala.json so your work
-persists instead of living in an ephemeral in-memory store.
+	Long: `Init provisions vala's Notion "brain" — the hunting databases that hold
+evidence, hunts, intel, detections, and the hunting backlog — and writes their
+data-source IDs into .vala.json so your work persists instead of living in an
+ephemeral in-memory store.
 
 It requires an authenticated Notion CLI (run "ntn login" first). Databases are
 created under the page given by --parent (you are prompted if it is omitted).
@@ -131,11 +131,7 @@ func verifyExisting(ctx context.Context, store *brain.NTN, cfg config.Config) er
 		name string
 		id   string
 	}{
-		{"alerts", cfg.Notion.Alerts},
-		{"cases", cfg.Notion.Cases},
 		{"evidence", cfg.Notion.Evidence},
-		{"actions", cfg.Notion.Actions},
-		{"runs", cfg.Notion.Runs},
 		{"hunts", cfg.Notion.Hunts},
 		{"intel", cfg.Notion.Intel},
 		{"detections", cfg.Notion.Detections},
