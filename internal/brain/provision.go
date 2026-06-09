@@ -47,31 +47,6 @@ type DBSpec struct {
 func Schema() []DBSpec {
 	return []DBSpec{
 		{
-			Name:  DBAlerts,
-			Title: "Vala Alerts",
-			Props: []PropSpec{
-				{"alert_id", "title"},
-				{"source", "rich_text"},
-				{"severity", "select"},
-				{"raw", "rich_text"},
-				{"received_at", "date"},
-				{"status", "status"},
-			},
-			StatusOptions: map[string][]string{"status": {"linked"}},
-		},
-		{
-			Name:  DBCases,
-			Title: "Vala Cases",
-			Props: []PropSpec{
-				{"case_id", "title"},
-				{"status", "status"},
-				{"severity", "select"},
-				{"opened_at", "date"},
-			},
-			Relations:     []RelationSpec{{"alerts", DBAlerts}},
-			StatusOptions: map[string][]string{"status": {StatusTriage, StatusInvestigating, StatusContained, StatusResolved}},
-		},
-		{
 			Name:  DBEvidence,
 			Title: "Vala Evidence",
 			Props: []PropSpec{
@@ -81,39 +56,7 @@ func Schema() []DBSpec {
 				{"confidence", "select"},
 				{"collected_at", "date"},
 			},
-			Relations: []RelationSpec{{"case", DBCases}, {"hunt", DBHunts}},
-		},
-		{
-			Name:  DBActions,
-			Title: "Vala Actions",
-			Props: []PropSpec{
-				{"action_id", "title"},
-				{"type", "select"},
-				{"params", "rich_text"},
-				{"rationale", "rich_text"},
-				{"status", "status"},
-				{"approved_by", "rich_text"},
-				{"approved_at", "date"},
-				{"result", "rich_text"},
-				{"executed_at", "date"},
-			},
-			Relations: []RelationSpec{{"case", DBCases}},
-			// Action status values mirror governance.Status* (proposed → executed).
-			StatusOptions: map[string][]string{"status": {"proposed", "approved", "denied", "executed", "failed"}},
-		},
-		{
-			Name:  DBRuns,
-			Title: "Vala Runs",
-			Props: []PropSpec{
-				{"model", "title"},
-				{"commit", "rich_text"},
-				{"started_at", "date"},
-				{"ended_at", "date"},
-				{"phase_reached", "select"},
-				{"tool_calls", "number"},
-				{"violations", "number"},
-			},
-			Relations: []RelationSpec{{"case", DBCases}},
+			Relations: []RelationSpec{{"hunt", DBHunts}},
 		},
 		{
 			Name:  DBHunts,
@@ -145,7 +88,7 @@ func Schema() []DBSpec {
 				{"description", "rich_text"},
 				{"created_at", "date"},
 			},
-			Relations: []RelationSpec{{"hunts", DBHunts}, {"alerts", DBAlerts}, {"detections", DBDetections}},
+			Relations: []RelationSpec{{"hunts", DBHunts}, {"detections", DBDetections}},
 		},
 		{
 			Name:  DBDetections,
@@ -158,7 +101,7 @@ func Schema() []DBSpec {
 				{"mitre", "rich_text"},
 				{"level", "select"},
 			},
-			Relations: []RelationSpec{{"intel", DBIntel}, {"hunts", DBHunts}, {"alerts", DBAlerts}},
+			Relations: []RelationSpec{{"intel", DBIntel}, {"hunts", DBHunts}},
 		},
 		{
 			Name:  DBBacklog,
