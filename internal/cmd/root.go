@@ -146,7 +146,7 @@ func build() (*built, error) {
 func connectMCP(cfg config.Config, pol *policy.Set) []tool.Tool {
 	var evidence []tool.Tool
 	for _, srv := range cfg.MCP {
-		sess, err := mcp.Connect(context.Background(), mcp.ServerConfig{Name: srv.Name, URL: srv.URL, APIKey: srv.APIKey})
+		sess, err := openSession(srv)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "warning: mcp server %q unavailable: %v\n", srv.Name, err)
 			continue
@@ -161,4 +161,14 @@ func connectMCP(cfg config.Config, pol *policy.Set) []tool.Tool {
 		evidence = append(evidence, ts...)
 	}
 	return evidence
+}
+
+// openSession builds the evidence session for one configured server: a
+// file-backed local source when Source is "local" (offline sample logs, no
+// network or key), otherwise a streamable-HTTP connection to URL.
+func openSession(srv config.MCPServer) (mcp.Session, error) {
+	if srv.Source == "local" {
+		return mcp.NewLocal(srv.Name, srv.Dir)
+	}
+	return mcp.Connect(context.Background(), mcp.ServerConfig{Name: srv.Name, URL: srv.URL, APIKey: srv.APIKey})
 }

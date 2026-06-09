@@ -55,6 +55,14 @@ type MCPServer struct {
 	APIKeyEnv string `json:"api_key_env"`
 	// APIKey is resolved from APIKeyEnv, never persisted.
 	APIKey string `json:"-"`
+
+	// Source selects the backend. "" (default) dials URL over streamable HTTP;
+	// "local" serves log events from Dir as an offline, file-backed evidence
+	// source — a stand-in for a remote lake when you have no access or are
+	// testing. A local source needs neither URL nor APIKeyEnv.
+	Source string `json:"source"`
+	// Dir is the directory of JSON log files a "local" source reads from.
+	Dir string `json:"dir"`
 }
 
 // Default returns the built-in configuration.
@@ -101,6 +109,13 @@ func Load(cwd string) (Config, error) {
 	// without a config file, keyed by SCANNER_API_KEY.
 	if url := os.Getenv("SCANNER_MCP_URL"); url != "" && !hasMCPServer(cfg.MCP, "scanner") {
 		cfg.MCP = append(cfg.MCP, MCPServer{Name: "scanner", URL: url, APIKeyEnv: "SCANNER_API_KEY"})
+	}
+	// Convenience: SCANNER_SAMPLES_DIR registers an offline, file-backed
+	// "scanner" source — local JSON logs in place of a live data lake — so a
+	// hunt can be exercised end to end without Scanner access. A real URL or an
+	// explicit config entry takes precedence.
+	if dir := os.Getenv("SCANNER_SAMPLES_DIR"); dir != "" && !hasMCPServer(cfg.MCP, "scanner") {
+		cfg.MCP = append(cfg.MCP, MCPServer{Name: "scanner", Source: "local", Dir: dir})
 	}
 	// Resolve each server's bearer token from its named environment variable.
 	for i := range cfg.MCP {

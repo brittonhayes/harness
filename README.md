@@ -134,7 +134,7 @@ and the `1 of` / `all of` quantifiers. The embedded reference rules under
 Settings layer (lowest priority first): built-in defaults →
 `~/.config/vala/config.json` → `./.vala.json` → environment variables
 (`ANTHROPIC_API_KEY`, `VALA_MODEL`, `VALA_PERMISSION`, `VALA_ENV`,
-`SLACK_WEBHOOK_URL`, `SCANNER_MCP_URL`, `SCANNER_API_KEY`).
+`SLACK_WEBHOOK_URL`, `SCANNER_MCP_URL`, `SCANNER_API_KEY`, `SCANNER_SAMPLES_DIR`).
 
 ```json
 {
@@ -167,6 +167,27 @@ pages rows without flooding the model's context. As a shortcut, setting
 `SCANNER_MCP_URL` (plus `SCANNER_API_KEY`) registers Scanner without a config
 file. With no MCP server configured, vala has no remote evidence source and can
 only reason over local files.
+
+**Hunting offline (no Scanner access).** Any server can instead be a
+file-backed local source: set `"source": "local"` and a `"dir"` of JSON log
+files, and vala serves the same read-only `load_context` / `execute_query` tools
+from disk — no URL, no API key, no network. Name it `scanner` and every prompt,
+fixture, and detection works unchanged against your sample data. The shortcut is
+`SCANNER_SAMPLES_DIR`:
+
+```sh
+SCANNER_SAMPLES_DIR=samples vala
+```
+
+Each file under the directory is one index (named after the file); events are a
+JSON array or newline-delimited JSON (`.json`, `.jsonl`, `.ndjson`).
+`execute_query` takes space-separated terms ANDed together — a bare token
+matches anywhere in an event, `field:value` matches a dotted field. The bundled
+[`samples/`](samples) directory is a ready-to-hunt CloudTrail scenario:
+
+```json
+{ "mcp": [ { "name": "scanner", "source": "local", "dir": "samples" } ] }
+```
 
 `env` selects the policy environment (`dev`/`prod`). The `notion` values are
 **data-source IDs** (resolve a database ID with `ntn datasources resolve <id>`);
