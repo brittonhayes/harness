@@ -219,24 +219,55 @@ func (n *NTN) CreatePage(ctx context.Context, title, markdown string) (string, s
 	return extractID(out), "", nil
 }
 
-// Query reads rows back from a Notion database via `ntn datasources rows query`.
-// Like CreateRow, the exact ntn flags may evolve; it routes through one place so
-// the contract is easy to adjust, and parses the output tolerantly. This is the
-// path that lets the agent recall prior hunts, intel, and detections so each
-// hunt compounds on the last rather than repeating settled ground.
+// Query reads rows back from a Notion data source via `ntn datasources query`.
+// ntn 0.16's query takes a positional data-source ID and has no free-text
+// search — only structured --filter JSON — so we fetch a window with --json and
+// match the free-text query client-side, mirroring Mem's substring semantics.
+// This is the path that lets the agent recall prior hunts, intel, and detections
+// so each hunt compounds on the last rather than repeating settled ground.
+//
+// db must be a data-source ID, not a database ID; resolve a database ID with
+// `ntn datasources resolve <database-id>`.
 func (n *NTN) Query(ctx context.Context, db, query string, limit int) ([]Row, error) {
-	args := []string{"datasources", "rows", "query", "--datasource", db}
+	// With a free-text query we fetch a larger window so the client-side filter
+	// has rows to match against; without one we just take the most recent.
+	fetch := limit
 	if query != "" {
-		args = append(args, "--query", query)
+		fetch = queryFetchWindow
 	}
-	if limit > 0 {
-		args = append(args, "--limit", strconv.Itoa(limit))
+	args := []string{"datasources", "query", db, "--json"}
+	if fetch > 0 {
+		args = append(args, "--limit", strconv.Itoa(fetch))
 	}
 	out, err := n.run(ctx, args...)
 	if err != nil {
 		return nil, err
 	}
-	return parseRows(db, out), nil
+	rows := filterRows(parseRows(db, out), query)
+	if limit > 0 && len(rows) > limit {
+		rows = rows[:limit]
+	}
+	return rows, nil
+}
+
+// queryFetchWindow is how many rows Query pulls from a data source before
+// applying the client-side free-text filter (Notion caps a page at 100).
+const queryFetchWindow = 100
+
+// filterRows keeps rows whose serialized properties contain the query substring
+// (case-insensitive). An empty query keeps everything.
+func filterRows(rows []Row, query string) []Row {
+	if query == "" {
+		return rows
+	}
+	q := strings.ToLower(query)
+	out := rows[:0]
+	for _, r := range rows {
+		if strings.Contains(strings.ToLower(rowText(&r)), q) {
+			out = append(out, r)
+		}
+	}
+	return out
 }
 
 // parseRows extracts rows from ntn query output, tolerating either a bare JSON
