@@ -156,7 +156,7 @@ Settings layer (lowest priority first): built-in defaults →
     { "name": "scanner", "url": "https://<your>.scanner.dev/mcp", "api_key_env": "SCANNER_API_KEY" }
   ],
   "notion": {
-    "hunts": "", "intel": "", "detections": "", "backlog": ""
+    "evidence": "", "hunts": "", "intel": "", "detections": "", "backlog": ""
   }
 }
 ```
