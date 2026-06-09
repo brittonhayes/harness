@@ -67,7 +67,7 @@ single non-interactive task.`,
 			fmt.Fprintln(os.Stderr, "warning: transcript disabled:", err)
 		}
 		ag := agent.New(built.client, built.registry, built.gate, built.cwd, built.cfg.MaxSteps)
-		repl := ui.New(ag, built.gate, sess, built.client.Model())
+		repl := ui.New(ag, built.gate, sess, built.client.Model(), built.cfg.ContextWindow, built.cfg.AutoCompactThreshold)
 		return repl.Run(cmd.Context())
 	},
 }

@@ -24,19 +24,27 @@ type REPL struct {
 	Session *session.Session
 	Model   string
 
+	// ContextWindow and AutoCompactThreshold drive optimistic auto-compaction:
+	// when the latest prompt crosses ContextWindow*AutoCompactThreshold tokens,
+	// the session compacts before continuing. A non-positive value disables it.
+	ContextWindow        int64
+	AutoCompactThreshold float64
+
 	styles  Styles
 	program *tea.Program
 }
 
 // New builds a REPL. The Bubble Tea program reads from and writes to the
 // controlling terminal directly.
-func New(a *agent.Agent, gate *permission.Gate, sess *session.Session, model string) *REPL {
+func New(a *agent.Agent, gate *permission.Gate, sess *session.Session, model string, contextWindow int64, autoCompactThreshold float64) *REPL {
 	return &REPL{
-		Agent:   a,
-		Gate:    gate,
-		Session: sess,
-		Model:   model,
-		styles:  DefaultStyles(),
+		Agent:                a,
+		Gate:                 gate,
+		Session:              sess,
+		Model:                model,
+		ContextWindow:        contextWindow,
+		AutoCompactThreshold: autoCompactThreshold,
+		styles:               DefaultStyles(),
 	}
 }
 
@@ -74,6 +82,7 @@ func (r *REPL) events(p *tea.Program) agent.Events {
 		OnPermissionDenied: func(name, summary string) {
 			p.Send(deniedMsg{name: name})
 		},
+		OnUsage: func(input, output int64) { p.Send(usageMsg{input: input, output: output}) },
 	}
 }
 

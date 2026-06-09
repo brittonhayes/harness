@@ -38,6 +38,17 @@ type turnDoneMsg struct {
 	err     error
 }
 
+// usageMsg carries token counts reported by the agent after each model response.
+type usageMsg struct{ input, output int64 }
+
+// compactDoneMsg reports the result of a /compact or auto-compaction run.
+type compactDoneMsg struct {
+	history []anthropic.MessageParam
+	summary string
+	auto    bool // true when triggered by auto-compaction rather than /compact
+	err     error
+}
+
 // permMsg asks the operator to approve a tool call. The agent goroutine blocks
 // on reply until the UI answers.
 type permMsg struct {
@@ -63,10 +74,13 @@ type chatModel struct {
 	history []anthropic.MessageParam // conversation carried across turns
 	queue   []string                 // messages typed while a turn is running
 
-	running bool
-	phase   string
-	started time.Time
-	cancel  context.CancelFunc
+	running    bool
+	compacting bool // a compaction LLM call is in flight
+	phase      string
+	started    time.Time
+	cancel     context.CancelFunc
+
+	lastInputTokens int64 // most recent prompt token count, for auto-compaction
 
 	perm *permMsg // pending permission request, nil when none
 }
@@ -158,6 +172,13 @@ func (m chatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case turnDoneMsg:
 		return m.onTurnDone(msg)
 
+	case usageMsg:
+		m.lastInputTokens = msg.input
+		return m, nil
+
+	case compactDoneMsg:
+		return m.onCompactDone(msg)
+
 	case spinner.TickMsg:
 		if !m.running {
 			return m, nil
@@ -232,6 +253,15 @@ func (m chatModel) submit() (tea.Model, tea.Cmd) {
 	}
 	m.ta.Reset()
 	m.relayout()
+
+	// Slash commands are handled by the UI and never recorded as user turns or
+	// sent to the agent.
+	if strings.HasPrefix(input, "/") {
+		if model, cmd, handled := m.dispatchSlash(input); handled {
+			return model, cmd
+		}
+	}
+
 	m.repl.Session.Add(session.Entry{Kind: session.KindUser, Content: input})
 
 	if m.running {
@@ -274,6 +304,13 @@ func (m chatModel) onTurnDone(msg turnDoneMsg) (tea.Model, tea.Cmd) {
 		} else {
 			m.append("  " + m.styles.Error.Render("error: "+msg.err.Error()))
 		}
+		return m, nil // do not auto-compact on a failed turn
+	}
+	// Optimistically compact early when the prompt is approaching the window.
+	// Queued messages drain after the compaction completes, against the smaller
+	// history.
+	if m.shouldAutoCompact() {
+		return m.startCompaction("", true)
 	}
 	if len(m.queue) > 0 {
 		next := m.queue[0]
@@ -282,6 +319,71 @@ func (m chatModel) onTurnDone(msg turnDoneMsg) (tea.Model, tea.Cmd) {
 		return m.startTurn(next)
 	}
 	return m, nil
+}
+
+// startCompaction launches a conversation summary in a goroutine, mirroring
+// startTurn. It works for both manual /compact (auto=false) and optimistic
+// auto-compaction (auto=true).
+func (m chatModel) startCompaction(focus string, auto bool) (tea.Model, tea.Cmd) {
+	ctx, cancel := context.WithCancel(context.Background())
+	m.cancel = cancel
+	m.running = true
+	m.compacting = true
+	m.phase = "Compacting conversation"
+	m.started = time.Now()
+	if auto {
+		m.append("  " + m.styles.Hint.Render("● auto-compacting context (approaching window limit)…"))
+	} else {
+		m.append("  " + m.styles.Hint.Render("● compacting conversation…"))
+	}
+
+	p := m.repl.program
+	history := m.history
+	go func() {
+		newHist, summary, err := m.repl.Agent.Compact(ctx, history, focus)
+		p.Send(compactDoneMsg{history: newHist, summary: summary, auto: auto, err: err})
+	}()
+	return m, m.sp.Tick
+}
+
+// onCompactDone records the compaction result, swaps in the summarized history,
+// and drains any messages queued while it ran.
+func (m chatModel) onCompactDone(msg compactDoneMsg) (tea.Model, tea.Cmd) {
+	m.running = false
+	m.compacting = false
+	m.cancel = nil
+	if msg.err != nil {
+		if errors.Is(msg.err, context.Canceled) {
+			m.append("  " + m.styles.Denied.Render("⊘ compaction interrupted"))
+		} else {
+			m.append("  " + m.styles.Error.Render("compaction failed: "+msg.err.Error()))
+		}
+		return m, nil
+	}
+	m.history = msg.history
+	m.lastInputTokens = 0 // next turn re-measures the smaller prompt
+	m.repl.Session.Add(session.Entry{Kind: session.KindAssistant, Content: "[context compacted]\n\n" + msg.summary})
+	m.append("\n" + m.md.render("**Context compacted.**\n\n"+msg.summary))
+	if len(m.queue) > 0 {
+		next := m.queue[0]
+		m.queue = m.queue[1:]
+		m.append(m.styles.User.Render("› " + next))
+		return m.startTurn(next)
+	}
+	return m, nil
+}
+
+// shouldAutoCompact reports whether the latest prompt size has crossed the
+// configured fraction of the context window. Disabled when either threshold is
+// non-positive or when there is no history to compact.
+func (m chatModel) shouldAutoCompact() bool {
+	win := m.repl.ContextWindow
+	frac := m.repl.AutoCompactThreshold
+	if win <= 0 || frac <= 0 || len(m.history) == 0 {
+		return false
+	}
+	limit := int64(float64(win) * frac)
+	return m.lastInputTokens >= limit
 }
 
 // interrupt cancels the in-flight turn and resolves any pending permission
@@ -388,7 +490,7 @@ func (m chatModel) banner() string {
 	if p := m.repl.Session.Path(); p != "" {
 		b.WriteString("\n  " + m.styles.Hint.Render("transcript · "+p))
 	}
-	b.WriteString("\n  " + m.styles.Hint.Render(`type a request, "exit" to quit`))
+	b.WriteString("\n  " + m.styles.Hint.Render(`type a request · /help for commands · "exit" to quit`))
 	b.WriteString("\n  " + m.styles.Rule.Render(strings.Repeat("─", 52)))
 	return b.String()
 }
