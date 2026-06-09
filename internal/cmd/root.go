@@ -19,6 +19,7 @@ import (
 	"github.com/brittonhayes/vala/internal/tools"
 	"github.com/brittonhayes/vala/internal/ui"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 )
 
 // persisted flag values shared across commands.
@@ -47,6 +48,16 @@ single non-interactive task.`,
 	SilenceUsage:  true,
 	SilenceErrors: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		cfg, cwd, err := resolveConfig()
+		if err != nil {
+			return err
+		}
+		// First-run brain check: when no Notion brain is configured, warn that
+		// the session is ephemeral and (in a TTY) offer to run `vala init`.
+		interactive := term.IsTerminal(int(os.Stdin.Fd()))
+		if err := firstRunNotice(cmd.Context(), cfg, cwd, interactive); err != nil {
+			return err
+		}
 		built, err := build()
 		if err != nil {
 			return err
@@ -72,7 +83,9 @@ func Execute() {
 func init() {
 	rootCmd.PersistentFlags().StringVar(&flagModel, "model", "", "Anthropic model ID (overrides config)")
 	rootCmd.PersistentFlags().StringVar(&flagPermission, "permission", "", "permission mode: ask | allow | deny")
-	rootCmd.AddCommand(runCmd, harnessCmd, versionCmd)
+	rootCmd.PersistentFlags().BoolVar(&flagNoInitPrompt, "no-init-prompt", false, "suppress the first-run notice when no Notion brain is configured")
+	rootCmd.PersistentFlags().BoolVar(&flagRequireBrain, "require-brain", false, "fail instead of falling back to the ephemeral in-memory brain")
+	rootCmd.AddCommand(runCmd, harnessCmd, versionCmd, initCmd)
 }
 
 // built bundles the constructed dependencies for a command.

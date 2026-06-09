@@ -22,6 +22,13 @@ By default, non-read-only tools are denied in this mode (there is no operator
 to prompt). Pass --yes to auto-approve every tool call for an unattended run.`,
 	Args: cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		// Non-interactive: warn on stderr when the brain is ephemeral and keep
+		// going (automation must not block) unless --require-brain is set.
+		if cfg, cwd, err := resolveConfig(); err != nil {
+			return err
+		} else if err := firstRunNotice(cmd.Context(), cfg, cwd, false); err != nil {
+			return err
+		}
 		built, err := build()
 		if err != nil {
 			return err
