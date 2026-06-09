@@ -52,9 +52,11 @@ vala runs one loop, following the shape established hunt frameworks share
 rationale.
 
 **1 · Scope.** State the hypothesis with ABLE — the testable adversary
-**B**ehavior and the data-source **L**ocation where it would appear. `queue_hunt`
-records a trigger (intel, a hunch, a fresh CVE, a past incident) on a prioritized
-**backlog**.
+**B**ehavior and the data-source **L**ocation where it would appear. `recall`
+reads the brain back first — prior hunts, intel, and detections — so settled
+ground isn't re-hunted and related intel is pulled forward; this is what makes
+each hunt compound on the last. `queue_hunt` records a trigger (intel, a hunch, a
+fresh CVE, a past incident) on a prioritized **backlog**.
 
 **2 · Hunt.** `open_hunt` starts a hypothesis-driven hunt. vala explores
 read-only data sources, recording each fact as an immutable Finding pointer and
@@ -145,10 +147,14 @@ Settings layer (lowest priority first): built-in defaults →
 }
 ```
 
-`env` selects the policy environment (`dev`/`prod`). Notion database IDs enable
-real Notion writes; leave them empty to run in local mode. Every non-read-only
-tool call is gated by `--permission`: `ask` (default) prompts per call, `allow`
-auto-approves for unattended runs, `deny` blocks all writes.
+`env` selects the policy environment (`dev`/`prod`). The `notion` values are
+**data-source IDs** (resolve a database ID with `ntn datasources resolve <id>`);
+set them to enable real Notion reads and writes, or leave them empty to run in
+local mode. vala reads each data source's schema and types properties to match,
+so each data source's property names should match the field keys vala writes
+(`hunt_id`, `status`, `started_at`, relations like `hunts`/`detections`, …).
+Every non-read-only tool call is gated by `--permission`: `ask` (default) prompts
+per call, `allow` auto-approves for unattended runs, `deny` blocks all writes.
 
 ## Development
 
