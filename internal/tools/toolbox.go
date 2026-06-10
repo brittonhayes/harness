@@ -49,6 +49,9 @@ func Toolbox(dir string, rc *RunContext, evidence ...tool.Tool) *tool.Registry {
 		&RecordIntel{RC: rc},
 		&LinkArtifacts{RC: rc},
 		&StoreHunt{RC: rc},
+		// Operator memory: record durable environment facts to VALA.md so future
+		// sessions start informed.
+		&Remember{Dir: dir},
 		// Notion documentation.
 		&NTN{Dir: dir},
 	)
