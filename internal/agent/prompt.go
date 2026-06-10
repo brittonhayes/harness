@@ -7,9 +7,11 @@ import (
 
 // SystemPrompt builds the agent's system prompt. It frames the harness, not a
 // persona: vala is a system for threat hunting and detection authoring that
-// documents its work in a Notion-backed brain via the ntn tool.
-func SystemPrompt(workdir string, toolNames []string) string {
-	return fmt.Sprintf(`This is vala, an agentic threat-hunting system.
+// documents its work in a Notion-backed brain via the ntn tool. operatorContext
+// is the trusted, operator-authored standing context from VALA.md (see
+// LoadOperatorContext); when non-empty it is appended as its own section.
+func SystemPrompt(workdir string, toolNames []string, operatorContext string) string {
+	base := fmt.Sprintf(`This is vala, an agentic threat-hunting system.
 
 vala operates a real workstation through tools and a Notion-backed brain that
 stores hunts, threat intelligence, evidence, and detections as connected,
@@ -32,6 +34,9 @@ deliverable of a confirmed hunt.
   If a call is denied, adapt — propose an alternative, don't loop on it.
 - Be explicit about findings: severity, affected entities, evidence, and the
   MITRE ATT&CK technique when relevant.
+- When a hunt teaches you a durable fact about this environment — where a log
+  source lives, a known-good baseline, a naming convention — call "remember" to
+  save it to VALA.md so future sessions start informed. Never store secrets.
 - When you have completed the task, stop and summarize what you did and found.
 
 # The hunt loop
@@ -135,4 +140,20 @@ for validation). Fix every reported issue before considering the task done.
 Use the ntn tool to read and write runbooks, incident timelines, and detection
 write-ups in Notion. Run a subcommand with --help first if you are unsure of
 its flags.`, workdir, "- "+strings.Join(toolNames, "\n- "))
+
+	if operatorContext == "" {
+		return base
+	}
+	return base + fmt.Sprintf(`
+
+# Standing context
+The following is standing context for this environment — crown-jewel assets,
+where logs live, what "normal" looks like, naming conventions, prior incidents.
+It comes from two places: the operator-authored %s, and shared memories the team
+has recorded in the brain as they hunt (each stamped with who learned it). Unlike
+tool output, it is trusted guidance: weave it into scoping and hunting so you
+start with the environment's reality instead of re-deriving it. When a hunt
+teaches you a new durable fact, call "remember" to add it for everyone next time.
+
+%s`, OperatorContextFile, operatorContext)
 }

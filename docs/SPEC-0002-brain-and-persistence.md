@@ -1,7 +1,8 @@
 # SPEC-0002 · Brain & Persistence
 
-> vala's memory is a five-table graph — backlog, hunts, evidence, intel,
-> detections — backed by either an in-memory store or a Notion workspace.
+> vala's memory is a six-table graph — backlog, hunts, evidence, intel,
+> detections, memory — backed by an in-memory store, a JSON file, or a Notion
+> workspace. A Notion workspace makes memory multiplayer: one team, one brain.
 
 | Field | Value |
 |---|---|
@@ -13,10 +14,10 @@
 
 ## 1. Purpose & scope
 
-This spec defines vala's persistence layer — "the brain": the five logical
-tables, the fields and relations on each, the two interchangeable storage
-backends, and how a Notion brain is provisioned. It covers the data model and
-the storage contract.
+This spec defines vala's persistence layer — "the brain": the six logical
+tables, the fields and relations on each, the interchangeable storage backends,
+and how a Notion brain is provisioned. It covers the data model and the storage
+contract.
 
 It does **not** cover the tools that write the brain (that is
 [SPEC-0004](SPEC-0004-hunting-workflow.md)) nor the configuration that points
@@ -24,14 +25,15 @@ vala at a Notion workspace (that is [SPEC-0009](SPEC-0009-configuration.md)).
 
 ## 2. Definitions
 
-- **Store / table** — one of the five logical databases, named by a `DB*`
+- **Store / table** — one of the six logical databases, named by a `DB*`
   constant: `evidence`, `hunts`, `intel`, `detections`, `backlog`.
 - **Row** — one artifact in a store: `{ID, DB, Props}` where `Props` is a flat
   `map[string]any` of property name → value.
 - **Relation** — a property whose value is a list of row IDs, forming a graph
   edge between stores.
 - **Backend** — the concrete storage implementing the `Notion` interface: `Mem`
-  (in-memory) or `NTN` (a real Notion workspace via the `ntn` CLI / API).
+  (in-memory), `File` (a JSON file on disk), or `NTN` (a real Notion workspace
+  via the `ntn` CLI / API).
 - **Data-source ID** — Notion's identifier for the queryable schema behind a
   database; the brain reads and writes against data-source IDs, not database IDs.
 
@@ -39,9 +41,9 @@ vala at a Notion workspace (that is [SPEC-0009](SPEC-0009-configuration.md)).
 
 ### Data model
 
-- **R-0002-01** The brain MUST consist of exactly five logical stores: evidence,
-  hunts, intel, detections, backlog. The set of stores is the entire persistence
-  surface.
+- **R-0002-01** The brain MUST consist of exactly six logical stores: evidence,
+  hunts, intel, detections, backlog, memory. The set of stores is the entire
+  persistence surface.
 - **R-0002-02** `brain.Schema()` MUST be the single source of truth for the
   shape of every store: each store's title column, scalar properties, relation
   properties, and any status options. A property a writer emits MUST appear in
@@ -67,9 +69,10 @@ vala at a Notion workspace (that is [SPEC-0009](SPEC-0009-configuration.md)).
 - **R-0002-08** Both backends MUST implement one `Notion` interface so the brain
   client is backend-agnostic. The four methods are `CreateRow`, `UpdateRow`,
   `CreatePage`, `Query`.
-- **R-0002-09** With no Notion configured, vala MUST run in an ephemeral
-  in-memory brain (`Mem`) — fully functional, forgotten on exit. Configuration
-  selects `NTN`; nothing else changes for callers.
+- **R-0002-09** With no brain configured, vala MUST run in an ephemeral in-memory
+  brain (`Mem`) — fully functional, forgotten on exit. A configured `brain_file`
+  selects the durable `File` backend; configured Notion IDs select `NTN`. Nothing
+  else changes for callers: every backend implements the same `Notion` interface.
 - **R-0002-10** For the `NTN` backend, the brain client MUST translate logical
   store names to the configured Notion data-source IDs; for `Mem` it MUST use
   the logical names directly.
@@ -79,7 +82,7 @@ vala at a Notion workspace (that is [SPEC-0009](SPEC-0009-configuration.md)).
 
 ### Provisioning
 
-- **R-0002-12** `vala init` MUST provision all five databases under a parent
+- **R-0002-12** `vala init` MUST provision all six databases under a parent
   page, in two passes: scalar properties first, then relation properties once
   every target data source exists.
 - **R-0002-13** Provisioning MUST verify the operator is authenticated to Notion
@@ -111,7 +114,7 @@ type Row struct {
 name-mapper that turns each logical `DB*` name into the configured data-source
 ID; otherwise logical names pass through unchanged (R-0002-10).
 
-### The five stores
+### The six stores
 
 Property types are Notion types: `title`, `rich_text`, `select`, `status`,
 `date`. Relations name their target store.
@@ -186,6 +189,18 @@ YAML lives on disk; this row makes hunt/intel → detection relations first-clas
 | `created_at` | date | |
 | `hunt` → hunts | relation | the hunt it opened into |
 
+**memory** — durable, shareable operator facts about the environment (title:
+`memory_id`). Because memory lives in the brain, a team on one Notion workspace
+shares each other's memories; each row records who learned it.
+
+| Property | Type | Notes |
+|---|---|---|
+| `memory_id` | title | set to the fact text |
+| `fact` | rich_text | the durable environment fact |
+| `author` | rich_text | the operator who recorded it |
+| `created_at` | date | RFC 3339 |
+| `hunt` → hunts | relation | the hunt that taught it (optional) |
+
 ### The graph
 
 ```
@@ -194,6 +209,7 @@ Backlog ─►(opened as) Hunts ─►(produced) Detections
    │                    ▼ │                    │
   Intel ───(surfaced / informs)───────────────┘
             Evidence ──(backs)── Hunts
+             Memory ──(learned during)── Hunts
 ```
 
 ### Writer functions (the brain `Client`)
@@ -211,6 +227,8 @@ These are the only writers; each emits the exact property names above.
 | `QueueHunt(b BacklogItem) → id` | creates a backlog row, `status=Queued` |
 | `SetBacklogStatus(id, status, huntID)` | transitions status, sets `hunt` relation when given |
 | `Link(rowID, relation, targetIDs…)` | the single relation primitive; no-op on empty targets |
+| `Remember(m Memory) → id` | creates a memory row stamped with `author` (and an optional `hunt` relation) |
+| `Memories(query, limit) → []Memory` | typed read-back of shared memory, text-extracted across backends |
 | `Recall(db, query, limit) → []Row` | free-text read-back (see below) |
 
 ### Recall semantics
@@ -225,6 +243,12 @@ in-memory; `NTN` queries the data source and filters client-side.
 - **Mem** (`NewMem`) — synthetic IDs (`{db}_{seq}`), pages at `mem://{id}`,
   mutex-guarded, no network. Used in tests and unconfigured runs. Exposes
   `RowsIn(db)` for assertions.
+- **File** (`NewFile`) — the same synthetic-ID, substring-query semantics as
+  `Mem`, persisted to a single JSON file written atomically (temp + rename) on
+  every mutation and reloaded on open, so the ID sequence and rows survive across
+  sessions. Narrative pages are written as readable `.md` files in a `pages`
+  directory beside the JSON. Selected by the `brain_file` config key
+  (`vala init --local`); a durable brain with no external account.
 - **NTN** — shells the operator's authenticated `ntn` CLI / Notion API. Holds a
   `DBIDs` struct (one data-source ID per store + a narrative parent page ID),
   lazily caches each data source's property schema, and coerces flat props into
@@ -244,8 +268,8 @@ in-memory; `NTN` queries the data source and filters client-side.
 
 ## 5. Acceptance criteria
 
-- **A-0002-01** (R-0002-01) `brain.Schema()` returns exactly five `DBSpec`s
-  named evidence, hunts, intel, detections, backlog.
+- **A-0002-01** (R-0002-01) `brain.Schema()` returns exactly six `DBSpec`s
+  named evidence, hunts, intel, detections, backlog, memory.
 - **A-0002-02** (R-0002-02, R-0002-03) Every property emitted by a writer in
   `hunt.go`/`intel.go`/`backlog.go` appears in the matching `DBSpec.Props` or
   `Relations`; each `DBSpec` has exactly one `title` prop.
@@ -267,7 +291,7 @@ in-memory; `NTN` queries the data source and filters client-side.
   richer querying is the operator's job in Notion directly.
 - **No schema migration.** Changing `Schema()` against an already-provisioned
   workspace is not auto-migrated; the operator re-provisions.
-- **No backend beyond Mem and NTN.** Other stores are out of scope.
+- **No backend beyond Mem, File, and NTN.** Other stores are out of scope.
 
 ## 7. Open questions
 

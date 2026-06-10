@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/brittonhayes/vala/internal/agent"
 	"github.com/brittonhayes/vala/internal/brain"
@@ -63,7 +64,8 @@ single non-interactive task.`,
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "warning: transcript disabled:", err)
 		}
-		ag := agent.New(built.client, built.registry, built.gate, built.cwd, built.cfg.MaxSteps)
+		ag := agent.New(built.client, built.registry, built.gate, built.cwd, built.cfg.MaxSteps,
+			sessionContext(cmd.Context(), built.cwd, built.rc.Brain))
 		repl := ui.New(ag, built.gate, sess, built.client.Model(), built.cfg.ContextWindow, built.cfg.AutoCompactThreshold)
 		return repl.Run(cmd.Context())
 	},
@@ -92,6 +94,7 @@ type built struct {
 	client   *llm.Client
 	registry *tool.Registry
 	gate     *permission.Gate
+	rc       *tools.RunContext
 }
 
 // resolveConfig loads config for the current directory and applies persistent
@@ -134,20 +137,36 @@ func build() (*built, error) {
 	evidence := connectMCP(cfg)
 
 	// The session RunContext the hunt/intel tools write through. open_hunt sets
-	// its active hunt at runtime.
+	// its active hunt at runtime; Author stamps shared memories with this operator.
 	rc := tools.NewRunContext(brain.New(brainStore(cfg, cwd)))
+	rc.Author = resolveAuthor()
 	registry := tools.Toolbox(cwd, rc, evidence...)
 
-	return &built{cfg: cfg, cwd: cwd, client: client, registry: registry, gate: gate}, nil
+	return &built{cfg: cfg, cwd: cwd, client: client, registry: registry, gate: gate, rc: rc}, nil
 }
 
-// brainStore returns an NTN-backed store when Notion DB IDs are configured,
-// otherwise an in-memory store for local runs.
+// brainStore selects the brain backend: an NTN-backed store when Notion DB IDs
+// are configured, a durable file-backed store when a brain file is set, and an
+// ephemeral in-memory store otherwise. A file that fails to open degrades to
+// in-memory with a warning rather than blocking the session.
 func brainStore(cfg config.Config, cwd string) brain.Notion {
-	if brainConfigured(cfg) {
+	switch {
+	case brainConfigured(cfg):
 		return &brain.NTN{Dir: cwd, DBs: cfg.Notion}
+	case cfg.BrainFile != "":
+		path := cfg.BrainFile
+		if !filepath.IsAbs(path) {
+			path = filepath.Join(cwd, path)
+		}
+		f, err := brain.NewFile(path)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "⚠ could not open brain file %s: %v — using ephemeral memory\n", path, err)
+			return brain.NewMem()
+		}
+		return f
+	default:
+		return brain.NewMem()
 	}
-	return brain.NewMem()
 }
 
 // connectMCP dials every configured MCP server, discovers its tools, and returns

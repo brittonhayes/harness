@@ -49,6 +49,9 @@ func Toolbox(dir string, rc *RunContext, evidence ...tool.Tool) *tool.Registry {
 		&RecordIntel{RC: rc},
 		&LinkArtifacts{RC: rc},
 		&StoreHunt{RC: rc},
+		// Shared memory: record durable environment facts to the brain so the
+		// whole team's future sessions start informed.
+		&Remember{RC: rc},
 		// Notion documentation.
 		&NTN{Dir: dir},
 	)

@@ -71,21 +71,55 @@ vala run "validate and test every rule in my detections directory, report failur
 ## Give it a brain
 
 By default vala runs in ephemeral, in-memory mode — fine for a quick look,
-forgotten the moment you quit. Wire it to Notion once and your hunts, intel,
-evidence, and detections persist as one connected graph:
+forgotten the moment you quit. Give it a persistent brain and your hunts, intel,
+evidence, and detections compound across sessions. Two ways, depending on whether
+you want an account:
 
 ```sh
-vala init --parent <notion-page-id>
+vala init --local              # durable on-disk brain, no account needed
+vala init --parent <page-id>   # shared Notion-backed brain, one connected graph
 ```
 
-`init` provisions the brain's databases under that page and writes their
-data-source IDs into `.vala.json`. It's idempotent — re-run it any time to
-verify and reuse what's there rather than duplicating it.
+`--local` writes the brain to a single JSON file (`.vala/brain.json` by default)
+and records the path in `.vala.json`; narrative hunt pages land as readable
+Markdown beside it. It's the zero-dependency path — nothing to log into, and the
+whole brain is a portable, version-controllable artifact.
+
+`--parent` provisions the brain's databases under a Notion page and writes their
+data-source IDs into `.vala.json`. It's idempotent — re-run it any time to verify
+and reuse what's there rather than duplicating it.
 
 > [!NOTE]
-> `init` needs an authenticated [Notion CLI](https://github.com/makenotion/ntn)
-> (`ntn login`). Until you run it, vala reminds you on startup that it's in
-> memory-only mode (silence it with `--no-init-prompt`).
+> The Notion path needs an authenticated [Notion CLI](https://github.com/makenotion/ntn)
+> (`ntn login`); the `--local` path needs nothing. Until a brain is configured,
+> vala reminds you on startup that it's in memory-only mode (silence it with
+> `--no-init-prompt`).
+
+## Give it context
+
+vala opens every session with standing context about your environment, from two
+places:
+
+**`VALA.md`** is what you write by hand — a plain Markdown file vala reads into
+every session: crown-jewel systems, where each log source lives, what "normal"
+looks like, detection naming conventions, prior incidents. `vala init` drops a
+commented starter in your project; fill in what matters.
+
+```
+your-repo/VALA.md        ← project context, version-controlled with the team
+~/.config/vala/VALA.md   ← personal context, merged in first
+```
+
+**Shared memory** is what vala learns as it hunts. When the agent discovers a
+durable fact — "auth logs live in Okta", "svc-deploy rotates keys nightly" — it
+calls `remember`, which writes that fact to the brain stamped with who learned
+it. Point a whole team at the same Notion brain and memory becomes **multiplayer**:
+one hunter's discovery primes everyone's next session. With a local brain it's
+still yours across sessions; ephemeral mode forgets it on exit.
+
+Unlike query results and file contents — which vala treats as untrusted data —
+both VALA.md and team memory are operator-authored, so vala trusts them as
+guidance.
 
 ## The hunt loop
 
@@ -168,8 +202,9 @@ Settings layer lowest-priority first: built-in defaults →
   "mcp": [
     { "name": "scanner", "url": "https://<your>.scanner.dev/mcp", "api_key_env": "SCANNER_API_KEY" }
   ],
+  "brain_file": "",
   "notion": {
-    "evidence": "", "hunts": "", "intel": "", "detections": "", "backlog": ""
+    "evidence": "", "hunts": "", "intel": "", "detections": "", "backlog": "", "memory": ""
   }
 }
 ```
