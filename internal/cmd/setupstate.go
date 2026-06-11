@@ -64,6 +64,8 @@ func mcpNames(cfg config.Config) []string {
 // brainSummary describes the configured brain backend for the setup hub.
 func brainSummary(cfg config.Config) string {
 	switch {
+	case brainConfigured(cfg) && !brainComplete(cfg):
+		return "Notion — needs repair"
 	case brainConfigured(cfg):
 		return "Notion (shared)"
 	case cfg.BrainFile != "":
@@ -73,9 +75,20 @@ func brainSummary(cfg config.Config) string {
 	}
 }
 
+// brainReady reports whether the brain is set up AND usable: a Notion brain must
+// have every store's data source (brainComplete), an on-disk brain just needs a
+// path. An incomplete Notion brain is configured but not ready — it routes to
+// repair rather than counting as done.
+func brainReady(cfg config.Config) bool {
+	if brainConfigured(cfg) {
+		return brainComplete(cfg)
+	}
+	return cfg.BrainFile != ""
+}
+
 // setupComplete reports whether all three surfaces are ready.
 func setupComplete(cfg config.Config) bool {
-	return providerConfigured(cfg) && (brainConfigured(cfg) || cfg.BrainFile != "") && evidenceConfigured(cfg)
+	return providerConfigured(cfg) && brainReady(cfg) && evidenceConfigured(cfg)
 }
 
 // maybeRunSetup launches the onboarding wizard when the interactive session
@@ -85,23 +98,29 @@ func setupComplete(cfg config.Config) bool {
 // operator re-runs it on demand with `vala setup`. force shows every step even
 // when already configured.
 func maybeRunSetup(ctx context.Context, cfg config.Config, cwd string, force bool) (proceed bool, err error) {
+	// A configured-but-incomplete Notion brain is a broken state (failing API
+	// calls against a missing data source). We open the wizard to repair it even
+	// when the first-run prompt was dismissed, so the operator is never stuck.
+	brokenBrain := brainConfigured(cfg) && !brainComplete(cfg)
 	if !force {
 		if flagRequireBrain && !(brainConfigured(cfg) || cfg.BrainFile != "") {
-			return false, fmt.Errorf("no brain is configured; run `vala init` (or unset --require-brain)")
+			return false, fmt.Errorf("no brain is configured; run `vala setup` (or unset --require-brain)")
 		}
-		if setupComplete(cfg) || flagNoInitPrompt || initPromptDismissed(cwd) {
+		if !brokenBrain && (setupComplete(cfg) || flagNoInitPrompt || initPromptDismissed(cwd)) {
 			return true, nil
 		}
 	}
 
 	res, err := setup.Run(ctx, setup.Options{
-		Cwd:        cwd,
-		ProviderOK: providerConfigured(cfg),
-		BrainOK:    brainConfigured(cfg) || cfg.BrainFile != "",
-		Model:      cfg.Provider + " · " + cfg.Model,
-		Brain:      brainSummary(cfg),
-		Evidence:   mcpNames(cfg),
-		Force:      force,
+		Cwd:              cwd,
+		ProviderOK:       providerConfigured(cfg),
+		BrainOK:          brainReady(cfg),
+		Model:            cfg.Provider + " · " + cfg.Model,
+		Brain:            brainSummary(cfg),
+		Evidence:         mcpNames(cfg),
+		Force:            force,
+		Notion:           cfg.Notion,
+		BrainNeedsRepair: brokenBrain,
 	})
 	if err != nil {
 		return false, err
@@ -110,11 +129,16 @@ func maybeRunSetup(ctx context.Context, cfg config.Config, cwd string, force boo
 		return false, nil
 	}
 	// Provision the on-disk brain the operator chose, reusing the helper that also
-	// scaffolds VALA.md and validates the file opens.
+	// scaffolds VALA.md and validates the file opens. A provisioned/repaired Notion
+	// brain saves its own IDs in the wizard; here we just scaffold the operator
+	// context so both brain choices land in the same place.
 	if res.BrainLocal {
 		if err := provisionLocalBrain(cwd, ""); err != nil {
 			fmt.Fprintln(os.Stderr, "warning: could not set up local brain:", err)
 		}
+	}
+	if res.BrainNotion {
+		scaffoldOperatorContext(cwd)
 	}
 	if !force {
 		dismissInitPrompt(cwd)

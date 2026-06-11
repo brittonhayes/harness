@@ -39,16 +39,24 @@ type DBSpec struct {
 	StatusOptions map[string][]string
 }
 
-// Schema returns the canonical schema `vala init` provisions: one DBSpec per
-// brain store, with property names and types matching exactly what the writers
-// emit (see brain.go, hunt.go, intel.go, backlog.go). It is the single source of
+// brainDBTitle is the title of the single Notion database that holds every brain
+// store as a data source. One database keeps the workspace uncluttered (one
+// top-level object instead of seven) and lets the whole brain be provisioned,
+// verified, and repaired as a unit.
+const brainDBTitle = "Vala Brain"
+
+// Schema returns the canonical schema setup provisions: one DBSpec per brain
+// store, with property names and types matching exactly what the writers emit
+// (see brain.go, hunt.go, intel.go, backlog.go). It is the single source of
 // truth shared by provisioning and the writers — a property a writer emits must
-// appear here or NTN.CreateRow will silently drop it.
+// appear here or NTN.CreateRow will silently drop it. Each spec becomes a data
+// source inside the single brainDBTitle database, so the titles are the bare
+// store names (the database title already namespaces them as "Vala").
 func Schema() []DBSpec {
 	return []DBSpec{
 		{
 			Name:  DBEvidence,
-			Title: "Vala Evidence",
+			Title: "Evidence",
 			Props: []PropSpec{
 				{"claim", "title"},
 				{"kind", "select"},
@@ -60,7 +68,7 @@ func Schema() []DBSpec {
 		},
 		{
 			Name:  DBHunts,
-			Title: "Vala Hunts",
+			Title: "Hunts",
 			Props: []PropSpec{
 				{"hunt_id", "title"},
 				{"question", "rich_text"},
@@ -80,7 +88,7 @@ func Schema() []DBSpec {
 		},
 		{
 			Name:  DBIntel,
-			Title: "Vala Intel",
+			Title: "Intel",
 			Props: []PropSpec{
 				{"intel_id", "title"},
 				{"kind", "select"},
@@ -95,7 +103,7 @@ func Schema() []DBSpec {
 		},
 		{
 			Name:  DBDetections,
-			Title: "Vala Detections",
+			Title: "Detections",
 			Props: []PropSpec{
 				{"detection_id", "title"},
 				{"title", "rich_text"},
@@ -108,7 +116,7 @@ func Schema() []DBSpec {
 		},
 		{
 			Name:  DBBacklog,
-			Title: "Vala Backlog",
+			Title: "Backlog",
 			Props: []PropSpec{
 				{"backlog_id", "title"},
 				{"trigger", "rich_text"},
@@ -125,7 +133,7 @@ func Schema() []DBSpec {
 		},
 		{
 			Name:  DBMemory,
-			Title: "Vala Memory",
+			Title: "Memory",
 			Props: []PropSpec{
 				{"memory_id", "title"},
 				{"fact", "rich_text"},
@@ -136,7 +144,7 @@ func Schema() []DBSpec {
 		},
 		{
 			Name:  DBCoverage,
-			Title: "Vala Coverage",
+			Title: "Coverage",
 			Props: []PropSpec{
 				{"technique", "title"},
 				{"tactic", "rich_text"},
@@ -152,10 +160,12 @@ func Schema() []DBSpec {
 }
 
 // DBIDsFromMap assembles a DBIDs from a logical-store-name -> data-source-ID map
-// (keyed by the brain.DB* constants) plus the narrative-page parent page ID. It
-// is the bridge from provisioning output to the config the brain reads.
-func DBIDsFromMap(ds map[string]string, parent string) DBIDs {
+// (keyed by the brain.DB* constants), the parent database ID, and the
+// narrative-page parent page ID. It is the bridge from provisioning output to
+// the config the brain reads.
+func DBIDsFromMap(ds map[string]string, database, parent string) DBIDs {
 	return DBIDs{
+		Database:   database,
 		Evidence:   ds[DBEvidence],
 		Hunts:      ds[DBHunts],
 		Intel:      ds[DBIntel],
@@ -164,6 +174,21 @@ func DBIDsFromMap(ds map[string]string, parent string) DBIDs {
 		Memory:     ds[DBMemory],
 		Coverage:   ds[DBCoverage],
 		Parent:     parent,
+	}
+}
+
+// byName inverts DBIDs to a logical-store-name -> data-source-ID map (keyed by
+// the brain.DB* constants), so provisioning and repair can work in the same
+// shape DBIDsFromMap consumes.
+func (ids DBIDs) byName() map[string]string {
+	return map[string]string{
+		DBEvidence:   ids.Evidence,
+		DBHunts:      ids.Hunts,
+		DBIntel:      ids.Intel,
+		DBDetections: ids.Detections,
+		DBBacklog:    ids.Backlog,
+		DBMemory:     ids.Memory,
+		DBCoverage:   ids.Coverage,
 	}
 }
 
@@ -235,6 +260,194 @@ func (n *NTN) AddRelations(ctx context.Context, dsID string, rels map[string]str
 	return err
 }
 
+// CreateDataSource adds a data source to an existing database (parent
+// database_id), with schema props and statusOptions seeding any "status"
+// property's allowed values. It returns the new data source's ID. This is how
+// every store after the first is created under the single brain database.
+func (n *NTN) CreateDataSource(ctx context.Context, dbID, title string, props []PropSpec, statusOptions map[string][]string) (string, error) {
+	schema := make(map[string]any, len(props))
+	for _, p := range props {
+		schema[p.Name] = propConfig(p.Type, statusOptions[p.Name])
+	}
+	body := map[string]any{
+		"parent":     map[string]any{"type": "database_id", "database_id": dbID},
+		"title":      richText(title),
+		"properties": schema,
+	}
+	out, err := n.api(ctx, "POST", "/v1/data_sources", body)
+	if err != nil {
+		return "", err
+	}
+	var resp struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(out, &resp); err != nil {
+		return "", fmt.Errorf("parse created data source: %w", err)
+	}
+	if resp.ID == "" {
+		return "", fmt.Errorf("create data source %q: no id in response", title)
+	}
+	return resp.ID, nil
+}
+
+// renameDataSource sets a data source's title. It is cosmetic — the database
+// gives its initial data source the database title, so we relabel it to the
+// store name — and so failures are not fatal to provisioning.
+func (n *NTN) renameDataSource(ctx context.Context, dsID, title string) error {
+	_, err := n.api(ctx, "PATCH", "/v1/data_sources/"+dsID, map[string]any{"title": richText(title)})
+	return err
+}
+
+// DatabaseExists reports whether a database ID resolves — used to decide whether
+// a configured brain can be repaired in place (add the missing data sources) or
+// must be re-provisioned from scratch.
+func (n *NTN) DatabaseExists(ctx context.Context, dbID string) bool {
+	if dbID == "" {
+		return false
+	}
+	_, err := n.api(ctx, "GET", "/v1/databases/"+dbID, nil)
+	return err == nil
+}
+
+// Provision creates the single brain database with one data source per store,
+// wires the relation properties, creates the narrative hunt-page parent, and
+// returns the resulting DBIDs. parentPageID is the Notion page the database and
+// hunt-page parent are created beneath. It is the full first-time setup, callable
+// from the onboarding wizard.
+func (n *NTN) Provision(ctx context.Context, parentPageID string) (DBIDs, error) {
+	if err := n.Whoami(ctx); err != nil {
+		return DBIDs{}, fmt.Errorf("the Notion CLI is not authenticated: %w", err)
+	}
+	specs := Schema()
+	if len(specs) == 0 {
+		return DBIDs{}, fmt.Errorf("empty brain schema")
+	}
+
+	// The database is born with its first store as the initial data source; the
+	// rest are added under it. Collect logical name -> data-source ID as we go.
+	dsByName := make(map[string]string, len(specs))
+	first := specs[0]
+	dbID, dsID, err := n.CreateDatabase(ctx, parentPageID, brainDBTitle, first.Props, first.StatusOptions)
+	if err != nil {
+		return DBIDs{}, fmt.Errorf("create %s database: %w", brainDBTitle, err)
+	}
+	_ = n.renameDataSource(ctx, dsID, first.Title) // cosmetic; ignore failure
+	dsByName[first.Name] = dsID
+
+	for _, s := range specs[1:] {
+		id, err := n.CreateDataSource(ctx, dbID, s.Title, s.Props, s.StatusOptions)
+		if err != nil {
+			return DBIDs{}, fmt.Errorf("create %s data source: %w", s.Name, err)
+		}
+		dsByName[s.Name] = id
+	}
+
+	if err := n.wireRelations(ctx, dsByName, specs); err != nil {
+		return DBIDs{}, err
+	}
+
+	// Narrative hunt pages are written directly under the brain's home page
+	// (alongside the database) — no separate wrapper page to clutter the workspace.
+	return DBIDsFromMap(dsByName, dbID, parentPageID), nil
+}
+
+// Verify probes a configured brain: databaseOK is whether the parent database
+// still resolves, and missing lists the stores (brain.DB* names) whose data
+// source is unset or unreachable. It is the read side of repair — the wizard
+// uses it to decide between adding the missing data sources (databaseOK) and
+// re-provisioning from scratch.
+func (n *NTN) Verify(ctx context.Context, ids DBIDs) (missing []string, databaseOK bool) {
+	databaseOK = n.DatabaseExists(ctx, ids.Database)
+	byName := ids.byName()
+	for _, s := range Schema() {
+		id := byName[s.Name]
+		if id == "" || !n.DataSourceExists(ctx, id) {
+			missing = append(missing, s.Name)
+		}
+	}
+	return missing, databaseOK
+}
+
+// AddMissing repairs a configured brain in place: it recreates each missing
+// store's data source under the existing parent database and re-wires the
+// relations that touch a recreated store. It returns the patched DBIDs. The
+// caller must have confirmed the parent database resolves (Verify's databaseOK);
+// when it does not, the brain is re-provisioned from scratch instead.
+func (n *NTN) AddMissing(ctx context.Context, ids DBIDs, missing []string) (DBIDs, error) {
+	if ids.Database == "" {
+		return ids, fmt.Errorf("no parent database to repair into")
+	}
+	specsByName := make(map[string]DBSpec, len(Schema()))
+	for _, s := range Schema() {
+		specsByName[s.Name] = s
+	}
+
+	dsByName := ids.byName()
+	recreated := make(map[string]bool, len(missing))
+	for _, name := range missing {
+		s, ok := specsByName[name]
+		if !ok {
+			continue
+		}
+		id, err := n.CreateDataSource(ctx, ids.Database, s.Title, s.Props, s.StatusOptions)
+		if err != nil {
+			return ids, fmt.Errorf("recreate %s data source: %w", name, err)
+		}
+		dsByName[name] = id
+		recreated[name] = true
+	}
+
+	// Re-wire relations for every recreated store and for any surviving store
+	// whose relation pointed at one (its old target was deleted with the store).
+	var toWire []DBSpec
+	for _, s := range Schema() {
+		if relationsTouch(s, recreated) {
+			toWire = append(toWire, s)
+		}
+	}
+	if err := n.wireRelations(ctx, dsByName, toWire); err != nil {
+		return ids, err
+	}
+	return DBIDsFromMap(dsByName, ids.Database, ids.Parent), nil
+}
+
+// wireRelations adds each spec's relation properties, resolving every relation
+// target to its data-source ID in dsByName. It is the shared second pass used by
+// both Provision (all specs) and AddMissing (the affected subset).
+func (n *NTN) wireRelations(ctx context.Context, dsByName map[string]string, specs []DBSpec) error {
+	for _, s := range specs {
+		if len(s.Relations) == 0 {
+			continue
+		}
+		rels := make(map[string]string, len(s.Relations))
+		for _, r := range s.Relations {
+			target, ok := dsByName[r.Target]
+			if !ok || target == "" {
+				return fmt.Errorf("%s relation %q targets unknown store %q", s.Name, r.Name, r.Target)
+			}
+			rels[r.Name] = target
+		}
+		if err := n.AddRelations(ctx, dsByName[s.Name], rels); err != nil {
+			return fmt.Errorf("add relations to %s: %w", s.Name, err)
+		}
+	}
+	return nil
+}
+
+// relationsTouch reports whether spec s is the recreated store or has a relation
+// pointing at a recreated store — i.e. whether its relations must be re-wired.
+func relationsTouch(s DBSpec, recreated map[string]bool) bool {
+	if recreated[s.Name] {
+		return true
+	}
+	for _, r := range s.Relations {
+		if recreated[r.Target] {
+			return true
+		}
+	}
+	return false
+}
+
 // ResolveDataSource resolves a Notion database ID to its (first) data-source ID
 // via `ntn datasources resolve`. It tolerates the array, results-wrapped, or
 // bare-object JSON shapes the CLI may emit.
@@ -254,20 +467,6 @@ func (n *NTN) ResolveDataSource(ctx context.Context, dbID string) (string, error
 func (n *NTN) DataSourceExists(ctx context.Context, dsID string) bool {
 	_, err := n.api(ctx, "GET", "/v1/data_sources/"+dsID, nil)
 	return err == nil
-}
-
-// CreateChildPage creates an empty narrative-parent page titled title under
-// parentPageID and returns its ID. The brain writes hunt pages beneath it.
-func (n *NTN) CreateChildPage(ctx context.Context, parentPageID, title string) (string, error) {
-	out, err := n.runOut(ctx, "pages", "create", "--parent", "page:"+parentPageID, "--content", "# "+title, "--json")
-	if err != nil {
-		return "", err
-	}
-	id := extractID(string(out))
-	if id == "" {
-		return "", fmt.Errorf("create page %q: no id in output", title)
-	}
-	return id, nil
 }
 
 // propConfig returns the Notion property-configuration object for a type when

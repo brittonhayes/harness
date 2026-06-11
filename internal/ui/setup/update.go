@@ -1,6 +1,7 @@
 package setup
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/brittonhayes/vala/internal/auth"
@@ -31,6 +32,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case oauthExchangedMsg:
 		return m.onOAuthExchanged(msg)
+
+	case notionCheckedMsg:
+		return m.onNotionChecked(msg)
+
+	case notionLoginDoneMsg:
+		return m.onNotionLoginDone(msg)
+
+	case notionProvisionedMsg:
+		return m.onNotionProvisioned(msg)
 
 	case evidenceValidatedMsg:
 		m.evidence = append(m.evidence, msg.status)
@@ -65,7 +75,7 @@ func (m model) onKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m.choose()
 		}
 
-	case screenProviderOAuth, screenProviderKey, screenProviderLocal, screenEvidenceForm:
+	case screenProviderOAuth, screenProviderKey, screenProviderLocal, screenEvidenceForm, screenBrainNotionPage:
 		if key == "esc" {
 			return m.onEsc()
 		}
@@ -75,7 +85,7 @@ func (m model) onKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, cmd
 
-	case screenBrainNotion:
+	case screenBrainNotionDone:
 		if key == "enter" || key == "esc" {
 			return m.toHub()
 		}
@@ -126,6 +136,12 @@ func (m model) brainStatus() string {
 			return m.opts.Brain
 		}
 		return "configured"
+	}
+	// A pre-existing summary on an unfinished row means a configured brain that
+	// still needs attention (e.g. "Notion — needs repair"); surface it instead of
+	// the ephemeral default so the operator sees why the wizard opened.
+	if m.opts.Brain != "" {
+		return m.opts.Brain
 	}
 	return "ephemeral — findings vanish on exit"
 }
@@ -243,8 +259,7 @@ func (m model) choose() (tea.Model, tea.Cmd) {
 			m.brainDone = true
 			return m.toHub()
 		case "notion":
-			m.screen = screenBrainNotion
-			return m, nil
+			return m.startNotion()
 		default:
 			return m.toHub()
 		}
@@ -311,6 +326,16 @@ func (m model) submitForm() (tea.Model, tea.Cmd) {
 		m.screen = screenProviderBusy
 		m.busyLabel = "Signing in to " + m.provider.Name + "…"
 		return m, exchangeOAuthCmd(m.ctx, code, m.oauthVerifier)
+
+	case screenBrainNotionPage:
+		page := strings.TrimSpace(m.form.value("page"))
+		if page == "" {
+			m.errMsg = "a Notion page ID is required to create the brain"
+			return m, nil
+		}
+		m.screen = screenBrainNotionBusy
+		m.busyLabel = "Provisioning the Notion brain…"
+		return m, provisionNotionCmd(m.ctx, m.opts.Cwd, page)
 
 	case screenEvidenceForm:
 		return m.submitEvidence()
@@ -391,6 +416,87 @@ func (m model) beginOAuth() (tea.Model, tea.Cmd) {
 	m.notice = authz.URL
 	m.form = newForm(fieldSpec{key: "code", label: "Paste the code shown after you authorize"})
 	m.screen = screenProviderOAuth
+	return m, nil
+}
+
+// --- Notion brain sub-flow ---
+
+// startNotion enters the Notion brain flow: it checks the CLI is authenticated
+// and probes any existing brain, then routes to login, repair, or a fresh
+// provision based on what it finds.
+func (m model) startNotion() (tea.Model, tea.Cmd) {
+	m.screen = screenBrainNotionBusy
+	m.busyLabel = "Checking Notion…"
+	return m, checkNotionCmd(m.ctx, m.opts.Cwd, m.opts.Notion)
+}
+
+// onNotionChecked routes on the auth + health probe: log in if unauthenticated,
+// repair in place when the database survives but stores are missing, report a
+// healthy brain, or prompt for a parent page to provision a fresh one.
+func (m model) onNotionChecked(msg notionCheckedMsg) (tea.Model, tea.Cmd) {
+	if msg.err != nil {
+		m.notionErr = msg.err
+		m.screen = screenBrainNotionDone
+		return m, nil
+	}
+	if !msg.authed {
+		m.busyLabel = "Signing in to Notion…"
+		m.screen = screenBrainNotionBusy
+		return m, notionLoginCmd()
+	}
+	switch {
+	case msg.databaseOK && len(msg.missing) == 0:
+		// Already complete — nothing to do but confirm.
+		m.brainDone = true
+		m.opts.Brain = "Notion (shared)"
+		m.notionMsg = "Notion brain is healthy — nothing to repair."
+		m.screen = screenBrainNotionDone
+		return m, nil
+	case msg.databaseOK:
+		// The database survives; add back the missing data sources in place.
+		m.notionMissing = msg.missing
+		m.busyLabel = "Repairing the Notion brain…"
+		m.screen = screenBrainNotionBusy
+		return m, repairNotionCmd(m.ctx, m.opts.Cwd, m.opts.Notion, msg.missing)
+	default:
+		// No usable database (never provisioned, or a legacy multi-DB layout):
+		// provision a fresh single-database brain.
+		m.form = newForm(fieldSpec{key: "page", label: "Notion page ID to create the brain under", placeholder: "page ID or URL"})
+		m.screen = screenBrainNotionPage
+		return m, nil
+	}
+}
+
+// onNotionLoginDone re-probes after `ntn login` returns, so the flow continues
+// from the same decision point now that the CLI is authenticated.
+func (m model) onNotionLoginDone(msg notionLoginDoneMsg) (tea.Model, tea.Cmd) {
+	if msg.err != nil {
+		m.notionErr = fmt.Errorf("ntn login: %w", msg.err)
+		m.screen = screenBrainNotionDone
+		return m, nil
+	}
+	m.busyLabel = "Checking Notion…"
+	m.screen = screenBrainNotionBusy
+	return m, checkNotionCmd(m.ctx, m.opts.Cwd, m.opts.Notion)
+}
+
+// onNotionProvisioned records the outcome of a fresh provision or a repair. On
+// success it flags BrainNotion so the caller scaffolds VALA.md.
+func (m model) onNotionProvisioned(msg notionProvisionedMsg) (tea.Model, tea.Cmd) {
+	if msg.err != nil {
+		m.notionErr = msg.err
+		m.screen = screenBrainNotionDone
+		return m, nil
+	}
+	m.brainDone = true
+	m.result.BrainNotion = true
+	m.opts.Brain = "Notion (shared)"
+	if len(msg.repaired) > 0 {
+		m.notionMsg = "Repaired " + strings.Join(msg.repaired, ", ") + "."
+	} else {
+		m.notionMsg = "Notion brain provisioned — one database, all stores."
+	}
+	m.screen = screenBrainNotionDone
 	return m, nil
 }
 
