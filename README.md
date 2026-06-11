@@ -26,14 +26,17 @@ toolchain**: Sigma rules are validated and unit-tested offline, inside the binar
 
 ```sh
 go install github.com/brittonhayes/vala/cmd/vala@latest
-vala connect    # pick a provider and paste a key — or point at a local model
+vala connect    # sign in with a subscription, paste a key, or point at a local model
 ```
 
 `vala connect` is the one-time setup: choose Anthropic, OpenAI, Google,
 OpenRouter, Groq, DeepSeek, xAI, or a local runtime (Ollama, LM Studio), and
-vala stores the credential and remembers your choice. Already have a key in your
-environment (e.g. `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`)? vala picks it up
-automatically — no connect step needed.
+vala stores the credential and remembers your choice. For Anthropic you can
+**log in with your Claude Pro/Max subscription** — vala opens your browser, you
+paste back the one-time code, and no raw API key is ever entered or stored.
+Prefer a key? Paste one instead, or skip connect entirely: a key already in your
+environment (e.g. `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`) is picked up
+automatically.
 
 <details>
 <summary>Build from source</summary>

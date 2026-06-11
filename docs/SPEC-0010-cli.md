@@ -49,6 +49,11 @@ permission gate ([SPEC-0011](SPEC-0011-permissions-and-safety.md)).
   providers, a base URL for local ones), persist the credential to the store
   (`~/.config/vala/auth.json`) and the chosen `provider`/`model` to `./.vala.json`
   (see [SPEC-0009](SPEC-0009-configuration.md)). A named provider preselects it.
+- **R-0010-14** For a provider that supports a subscription login (OAuth, e.g.
+  Anthropic Claude Pro/Max), `vala connect` MUST offer signing in with the
+  subscription as an alternative to pasting an API key. Choosing it MUST open
+  (or print) the provider's browser consent URL, accept the pasted one-time
+  code, exchange it for tokens, and store an OAuth credential — never a raw key.
 
 ### Flags
 

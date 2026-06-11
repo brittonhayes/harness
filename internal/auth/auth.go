@@ -11,16 +11,31 @@ import (
 	"path/filepath"
 )
 
-// Credential is one stored provider login. Type is "api" for an API key; vala
-// reserves room to grow to OAuth here later. BaseURL, when set, overrides the
-// provider's default endpoint — this is how a local Ollama/LM Studio server or a
-// custom OpenAI-compatible gateway is remembered.
+// Credential is one stored provider login. Type is "api" for an API key or
+// "oauth" for a subscription login (e.g. Claude Pro/Max) where no raw key is
+// ever pasted. BaseURL, when set, overrides the provider's default endpoint —
+// this is how a local Ollama/LM Studio server or a custom OpenAI-compatible
+// gateway is remembered.
 type Credential struct {
 	Type    string `json:"type"`
 	Key     string `json:"key,omitempty"`
 	BaseURL string `json:"base_url,omitempty"`
 	Model   string `json:"model,omitempty"`
+
+	// OAuth fields, set when Type == "oauth". Access is the short-lived bearer
+	// token sent on each request; Refresh renews it without another browser
+	// round-trip; Expiry is the access token's expiry in Unix milliseconds, used
+	// to refresh proactively. These come from the provider's OAuth flow (see
+	// internal/auth/oauth) and let an operator connect with their existing
+	// subscription instead of minting an API key.
+	Access  string `json:"access,omitempty"`
+	Refresh string `json:"refresh,omitempty"`
+	Expiry  int64  `json:"expiry,omitempty"`
 }
+
+// IsOAuth reports whether the credential is a subscription (OAuth) login rather
+// than a raw API key.
+func (c Credential) IsOAuth() bool { return c.Type == "oauth" }
 
 // Store is the decoded auth file. Use Load to read it and Set/Remove to mutate
 // it (both persist immediately).

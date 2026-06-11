@@ -1,12 +1,17 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"os"
+	"os/exec"
+	"runtime"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/brittonhayes/vala/internal/auth"
+	"github.com/brittonhayes/vala/internal/auth/oauth"
 	"github.com/brittonhayes/vala/internal/config"
 	"github.com/brittonhayes/vala/internal/llm"
 	"github.com/spf13/cobra"
@@ -61,6 +66,13 @@ func runConnect(preselect string) error {
 		url := promptDefault(fmt.Sprintf("Base URL [%s]: ", info.BaseURL), info.BaseURL)
 		cred.BaseURL = url
 		fmt.Fprintf(os.Stderr, "✓ %s will use %s (no API key needed)\n", info.Name, url)
+	case info.OAuth && wantOAuth(info):
+		// Subscription login: no raw key is ever entered.
+		oauthCred, err := runOAuthLogin(info)
+		if err != nil {
+			return err
+		}
+		cred = oauthCred
 	default:
 		key, err := readSecret(fmt.Sprintf("Enter your %s API key: ", info.Name))
 		if err != nil {
@@ -142,10 +154,84 @@ func hintFor(p llm.ProviderInfo) string {
 	if p.Local {
 		return "local server, no key"
 	}
+	if p.OAuth {
+		if p.APIKeyEnv != "" {
+			return "subscription login or API key (" + p.APIKeyEnv + ")"
+		}
+		return "subscription login or API key"
+	}
 	if p.APIKeyEnv != "" {
 		return "API key (or " + p.APIKeyEnv + ")"
 	}
 	return "API key"
+}
+
+// wantOAuth asks whether to use the provider's subscription login or paste an
+// API key, defaulting to the login since that is the "no raw key" path the
+// operator opted into by choosing an OAuth-capable provider.
+func wantOAuth(info llm.ProviderInfo) bool {
+	fmt.Fprintf(os.Stderr, "How do you want to connect %s?\n", info.Name)
+	fmt.Fprintln(os.Stderr, "  1. Log in with your subscription (Claude Pro/Max) — no API key needed")
+	fmt.Fprintln(os.Stderr, "  2. Paste an API key")
+	choice := promptDefault("Choose [1]: ", "1")
+	switch strings.ToLower(strings.TrimSpace(choice)) {
+	case "2", "key", "api", "api-key":
+		return false
+	default:
+		return true
+	}
+}
+
+// runOAuthLogin drives the browser-based subscription login and returns the
+// resulting OAuth credential. It opens (or prints) the consent URL, waits for
+// the operator to paste back the one-time code, and exchanges it for tokens.
+func runOAuthLogin(info llm.ProviderInfo) (auth.Credential, error) {
+	authz, err := oauth.AnthropicAuthorize()
+	if err != nil {
+		return auth.Credential{}, fmt.Errorf("start login: %w", err)
+	}
+
+	fmt.Fprintln(os.Stderr, "\nOpening your browser to sign in to "+info.Name+".")
+	fmt.Fprintln(os.Stderr, "If it doesn't open, visit this URL:")
+	fmt.Fprintln(os.Stderr, "  "+authz.URL)
+	openBrowser(authz.URL)
+
+	code := promptDefault("\nPaste the code shown after you authorize: ", "")
+	if strings.TrimSpace(code) == "" {
+		return auth.Credential{}, fmt.Errorf("no authorization code entered")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	tok, err := oauth.AnthropicExchange(ctx, code, authz.Verifier)
+	if err != nil {
+		return auth.Credential{}, fmt.Errorf("complete login: %w", err)
+	}
+
+	fmt.Fprintf(os.Stderr, "✓ Signed in to %s with your subscription (no API key stored)\n", info.Name)
+	return auth.Credential{
+		Type:    "oauth",
+		Access:  tok.Access,
+		Refresh: tok.Refresh,
+		Expiry:  tok.Expiry.UnixMilli(),
+	}, nil
+}
+
+// openBrowser best-effort opens a URL in the operator's default browser. A
+// failure is silent — the URL is always printed as a fallback.
+func openBrowser(url string) {
+	var cmd string
+	var args []string
+	switch runtime.GOOS {
+	case "darwin":
+		cmd = "open"
+	case "windows":
+		cmd, args = "rundll32", []string{"url.dll,FileProtocolHandler"}
+	default:
+		cmd = "xdg-open"
+	}
+	args = append(args, url)
+	_ = exec.Command(cmd, args...).Start()
 }
 
 // promptDefault reads a line, returning def when the operator just presses enter.

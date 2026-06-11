@@ -151,6 +151,8 @@ func (m chatModel) connectList() string {
 		switch {
 		case p.Local:
 			hint = "local server, no key"
+		case p.OAuth:
+			hint = "subscription login (`vala connect`) or API key"
 		case p.APIKeyEnv != "":
 			hint = "API key or " + p.APIKeyEnv
 		}
@@ -176,7 +178,11 @@ func storeInlineCredential(info llm.ProviderInfo, secret string) error {
 	if info.Local {
 		cred.BaseURL = secret
 	} else {
+		// An inline secret is an API key, so drop any prior OAuth tokens: the
+		// operator is switching this provider back to key auth.
+		cred.Type = "api"
 		cred.Key = secret
+		cred.Access, cred.Refresh, cred.Expiry = "", "", 0
 	}
 	return store.Set(info.ID, cred)
 }

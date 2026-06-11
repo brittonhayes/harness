@@ -5,6 +5,7 @@ import (
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
+	"github.com/brittonhayes/vala/internal/auth/oauth"
 )
 
 // anthropicProvider speaks the Anthropic Messages API. It keeps Claude's native
@@ -15,10 +16,16 @@ type anthropicProvider struct {
 	model         string
 	maxTokens     int64
 	contextWindow int64
+	// oauth marks a client authenticated with a Claude Pro/Max subscription
+	// token rather than an API key. Such requests carry a Bearer token plus the
+	// OAuth beta header, and the Messages API expects Claude Code's identity as
+	// the leading system block — handled in Complete.
+	oauth bool
 }
 
-// newAnthropic builds an Anthropic provider. baseURL is optional (empty uses the
-// SDK default endpoint), which lets it also drive Anthropic-compatible gateways.
+// newAnthropic builds an API-key Anthropic provider. baseURL is optional (empty
+// uses the SDK default endpoint), which lets it also drive Anthropic-compatible
+// gateways.
 func newAnthropic(apiKey, baseURL, model string, maxTokens, contextWindow int64) *anthropicProvider {
 	opts := []option.RequestOption{option.WithAPIKey(apiKey)}
 	if baseURL != "" {
@@ -32,6 +39,42 @@ func newAnthropic(apiKey, baseURL, model string, maxTokens, contextWindow int64)
 	}
 }
 
+// newAnthropicOAuth builds an Anthropic provider authenticated with a
+// subscription (OAuth) access token. It sends the token as a Bearer credential
+// — never an x-api-key — and attaches the beta header the Messages API requires
+// for OAuth-authenticated inference.
+func newAnthropicOAuth(token, baseURL, model string, maxTokens, contextWindow int64) *anthropicProvider {
+	opts := []option.RequestOption{
+		option.WithAuthToken(token),
+		option.WithHeader("anthropic-beta", oauth.AnthropicBetaHeader),
+	}
+	if baseURL != "" {
+		opts = append(opts, option.WithBaseURL(baseURL))
+	}
+	return &anthropicProvider{
+		api:           anthropic.NewClient(opts...),
+		model:         model,
+		maxTokens:     maxTokens,
+		contextWindow: contextWindow,
+		oauth:         true,
+	}
+}
+
+// anthropicCodeIdentity is the leading system block the Messages API requires on
+// OAuth-authenticated requests. The subscription credential is scoped to
+// Claude Code's first-party identity, so the call must present it; vala's own
+// instructions follow in a second block.
+const anthropicCodeIdentity = "You are Claude Code, Anthropic's official CLI for Claude."
+
+// systemBlocks renders the system prompt for the wire. Under OAuth it prepends
+// the required Claude Code identity block ahead of vala's instructions.
+func (p *anthropicProvider) systemBlocks(system string) []anthropic.TextBlockParam {
+	if p.oauth {
+		return []anthropic.TextBlockParam{{Text: anthropicCodeIdentity}, {Text: system}}
+	}
+	return []anthropic.TextBlockParam{{Text: system}}
+}
+
 func (p *anthropicProvider) Model() string        { return p.model }
 func (p *anthropicProvider) Provider() string     { return "anthropic" }
 func (p *anthropicProvider) ContextWindow() int64 { return p.contextWindow }
@@ -42,7 +85,7 @@ func (p *anthropicProvider) Complete(ctx context.Context, system string, message
 	resp, err := p.api.Messages.New(ctx, anthropic.MessageNewParams{
 		Model:     anthropic.Model(p.model),
 		MaxTokens: p.maxTokens,
-		System:    []anthropic.TextBlockParam{{Text: system}},
+		System:    p.systemBlocks(system),
 		Messages:  toAnthropicMessages(messages),
 		Tools:     toAnthropicTools(tools),
 	})
