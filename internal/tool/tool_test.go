@@ -37,18 +37,18 @@ func TestRegistry(t *testing.T) {
 	}
 }
 
-func TestToAnthropic(t *testing.T) {
+func TestToolDefs(t *testing.T) {
 	r := NewRegistry()
 	r.Register(fakeTool{name: "alpha"})
-	params := r.ToAnthropic()
-	if len(params) != 1 {
-		t.Fatalf("expected 1 tool param, got %d", len(params))
+	defs := r.ToolDefs()
+	if len(defs) != 1 {
+		t.Fatalf("expected 1 tool def, got %d", len(defs))
 	}
-	tp := params[0].OfTool
-	if tp == nil || tp.Name != "alpha" {
-		t.Fatalf("unexpected tool param: %+v", tp)
+	td := defs[0]
+	if td.Name != "alpha" {
+		t.Fatalf("unexpected tool def: %+v", td)
 	}
-	if tp.InputSchema.Properties == nil {
+	if td.Properties == nil {
 		t.Fatal("expected non-nil properties")
 	}
 }

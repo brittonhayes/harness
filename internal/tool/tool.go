@@ -14,7 +14,7 @@ import (
 	"sort"
 	"sync"
 
-	"github.com/anthropics/anthropic-sdk-go"
+	"github.com/brittonhayes/vala/internal/llm"
 )
 
 // Schema is a minimal JSON Schema (draft 2020-12) description of a tool's
@@ -102,17 +102,17 @@ func (r *Registry) All() []Tool {
 	return out
 }
 
-// ToAnthropic converts the registry into the tool parameters the Anthropic
-// Messages API expects.
-func (r *Registry) ToAnthropic() []anthropic.ToolUnionParam {
-	return r.ToAnthropicFiltered(nil)
+// ToolDefs converts the registry into the provider-neutral tool definitions the
+// agent hands to whichever LLM provider is active.
+func (r *Registry) ToolDefs() []llm.ToolDef {
+	return r.ToolDefsFiltered(nil)
 }
 
-// ToAnthropicFiltered is like ToAnthropic but only includes tools for which the
+// ToolDefsFiltered is like ToolDefs but only includes tools for which the
 // predicate returns true. A nil predicate includes every tool.
-func (r *Registry) ToAnthropicFiltered(include func(Tool) bool) []anthropic.ToolUnionParam {
+func (r *Registry) ToolDefsFiltered(include func(Tool) bool) []llm.ToolDef {
 	tools := r.All()
-	out := make([]anthropic.ToolUnionParam, 0, len(tools))
+	out := make([]llm.ToolDef, 0, len(tools))
 	for _, t := range tools {
 		if include != nil && !include(t) {
 			continue
@@ -122,15 +122,11 @@ func (r *Registry) ToAnthropicFiltered(include func(Tool) bool) []anthropic.Tool
 		if props == nil {
 			props = map[string]any{}
 		}
-		out = append(out, anthropic.ToolUnionParam{
-			OfTool: &anthropic.ToolParam{
-				Name:        t.Name(),
-				Description: anthropic.String(t.Description()),
-				InputSchema: anthropic.ToolInputSchemaParam{
-					Properties: props,
-					Required:   s.Required,
-				},
-			},
+		out = append(out, llm.ToolDef{
+			Name:        t.Name(),
+			Description: t.Description(),
+			Properties:  props,
+			Required:    s.Required,
 		})
 	}
 	return out

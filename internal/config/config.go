@@ -14,8 +14,17 @@ import (
 
 // Config holds runtime settings for vala.
 type Config struct {
-	// Model is the Anthropic model ID used for the agent loop.
+	// Provider is the LLM provider id the agent talks to: a built-in
+	// ("anthropic", "openai", "google", "openrouter", "groq", "deepseek",
+	// "xai", "ollama", "lmstudio") or a custom one defined under Providers.
+	// Empty defaults to "anthropic", preserving pre-multi-provider configs.
+	Provider string `json:"provider"`
+	// Model is the model ID used for the agent loop, interpreted within the
+	// active provider (e.g. "claude-opus-4-8", "gpt-5", "gemini-2.5-pro").
 	Model string `json:"model"`
+	// Providers holds custom or overridden provider definitions, keyed by id.
+	// Use it to point at a local OpenAI-compatible server or a private gateway.
+	Providers map[string]ProviderConfig `json:"providers"`
 	// MaxTokens caps the response size per turn.
 	MaxTokens int64 `json:"max_tokens"`
 	// Permission is the default permission mode: ask | allow | deny.
@@ -51,6 +60,26 @@ type Config struct {
 	APIKey string `json:"-"`
 }
 
+// ProviderConfig describes a custom or overridden LLM provider. For a built-in
+// provider, any non-empty field overrides the registry default; for a brand-new
+// provider id, it defines the endpoint outright (protocol defaults to the
+// OpenAI-compatible wire format, which most servers speak). Secrets are never
+// stored here — only the name of the environment variable that holds the key.
+type ProviderConfig struct {
+	// BaseURL is the API endpoint (required for a custom OpenAI-compatible
+	// provider, e.g. a local server or private gateway).
+	BaseURL string `json:"base_url"`
+	// Protocol is the wire format: "anthropic" or "openai". Empty means openai.
+	Protocol string `json:"protocol"`
+	// APIKeyEnv names the environment variable holding the provider's API key.
+	APIKeyEnv string `json:"api_key_env"`
+	// Model is the default model id for this provider when none is configured.
+	Model string `json:"model"`
+	// Local marks a provider that runs on the operator's machine and needs no
+	// API key.
+	Local bool `json:"local"`
+}
+
 // MCPServer describes one Model Context Protocol server vala connects to. The
 // API key is resolved from APIKeyEnv at load time so secrets stay in the
 // environment rather than the config file.
@@ -69,6 +98,7 @@ type MCPServer struct {
 // Default returns the built-in configuration.
 func Default() Config {
 	return Config{
+		Provider:      "anthropic",
 		Model:         "claude-opus-4-8",
 		MaxTokens:     8192,
 		Permission:    "ask",
@@ -94,6 +124,9 @@ func Load(cwd string) (Config, error) {
 
 	if v := os.Getenv("ANTHROPIC_API_KEY"); v != "" {
 		cfg.APIKey = v
+	}
+	if v := os.Getenv("VALA_PROVIDER"); v != "" {
+		cfg.Provider = v
 	}
 	if v := os.Getenv("VALA_MODEL"); v != "" {
 		cfg.Model = v

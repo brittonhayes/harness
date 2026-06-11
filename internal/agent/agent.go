@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/brittonhayes/vala/internal/llm"
 	"github.com/brittonhayes/vala/internal/permission"
 	"github.com/brittonhayes/vala/internal/tool"
@@ -58,9 +57,9 @@ func (e Events) usage(in, out int64) {
 	}
 }
 
-// Agent ties together the model client, tools, and permission gate.
+// Agent ties together the model provider, tools, and permission gate.
 type Agent struct {
-	llm      *llm.Client
+	llm      llm.Provider
 	registry *tool.Registry
 	gate     *permission.Gate
 	system   string
@@ -71,7 +70,7 @@ type Agent struct {
 // operatorContext is the trusted standing context to embed (operator-authored
 // VALA.md plus shared brain memories); the caller assembles it so the agent
 // package stays free of the brain dependency. Empty means no context section.
-func New(client *llm.Client, registry *tool.Registry, gate *permission.Gate, workdir string, maxSteps int, operatorContext string) *Agent {
+func New(client llm.Provider, registry *tool.Registry, gate *permission.Gate, workdir string, maxSteps int, operatorContext string) *Agent {
 	names := make([]string, 0)
 	for _, t := range registry.All() {
 		names = append(names, t.Name())
@@ -88,41 +87,52 @@ func New(client *llm.Client, registry *tool.Registry, gate *permission.Gate, wor
 	}
 }
 
+// SetProvider swaps the model provider in place, so an operator can switch
+// providers mid-session with /connect without losing the conversation. The
+// system prompt and toolbox are unaffected.
+func (a *Agent) SetProvider(p llm.Provider) { a.llm = p }
+
+// Connected reports whether a model provider is wired up.
+func (a *Agent) Connected() bool { return a.llm != nil }
+
 // Run advances the conversation by one user turn. It appends the user input to
 // history, drives the tool-use loop to completion, and returns the updated
 // history so the caller can persist it and continue the session. Every tool is
 // exposed and gated only by permission.Gate.Allow.
-func (a *Agent) Run(ctx context.Context, history []anthropic.MessageParam, userInput string, ev Events) ([]anthropic.MessageParam, error) {
-	messages := append(history, anthropic.NewUserMessage(anthropic.NewTextBlock(userInput)))
-	decide := func(block anthropic.ContentBlockUnion, summary string, t tool.Tool) (bool, string) {
+func (a *Agent) Run(ctx context.Context, history []llm.Message, userInput string, ev Events) ([]llm.Message, error) {
+	if a.llm == nil {
+		return history, fmt.Errorf("no model provider connected — run /connect to choose one")
+	}
+	messages := append(history, llm.UserText(userInput))
+	decide := func(block llm.Block, summary string, t tool.Tool) (bool, string) {
 		return a.gate.Allow(block.Name, summary, t.ReadOnly()), "Operator denied permission to run this tool."
 	}
-	return a.loop(ctx, messages, a.system, a.registry.ToAnthropic(), decide, a.maxSteps, ev)
+	return a.loop(ctx, messages, a.system, a.registry.ToolDefs(), decide, a.maxSteps, ev)
 }
 
 // decideFunc decides whether a tool call may run, returning the denial message
 // to feed back to the model if not.
-type decideFunc func(block anthropic.ContentBlockUnion, summary string, t tool.Tool) (allow bool, denyMsg string)
+type decideFunc func(block llm.Block, summary string, t tool.Tool) (allow bool, denyMsg string)
 
 // loop is the tool-use loop body. It runs until the model stops requesting
 // tools or the step limit hits.
-func (a *Agent) loop(ctx context.Context, messages []anthropic.MessageParam, system string, tools []anthropic.ToolUnionParam, decide decideFunc, maxSteps int, ev Events) ([]anthropic.MessageParam, error) {
+func (a *Agent) loop(ctx context.Context, messages []llm.Message, system string, tools []llm.ToolDef, decide decideFunc, maxSteps int, ev Events) ([]llm.Message, error) {
 	for step := 0; step < maxSteps; step++ {
 		resp, err := a.llm.Complete(ctx, system, messages, tools)
 		if err != nil {
 			return messages, fmt.Errorf("model request failed: %w", err)
 		}
-		messages = append(messages, resp.ToParam())
+		messages = append(messages, llm.AssistantMessage(resp.Content...))
 		ev.usage(resp.Usage.InputTokens, resp.Usage.OutputTokens)
 
-		var toolResults []anthropic.ContentBlockParamUnion
+		var toolResults []llm.Block
 		for _, block := range resp.Content {
 			switch block.Type {
-			case "text":
+			case llm.BlockText:
 				if t := strings.TrimSpace(block.Text); t != "" {
 					ev.assistantText(block.Text)
 				}
-			case "tool_use":
+			case llm.BlockToolUse:
 				toolResults = append(toolResults, a.runToolUse(ctx, block, decide, ev))
 			}
 		}
@@ -131,14 +141,14 @@ func (a *Agent) loop(ctx context.Context, messages []anthropic.MessageParam, sys
 		if len(toolResults) == 0 {
 			return messages, nil
 		}
-		messages = append(messages, anthropic.NewUserMessage(toolResults...))
+		messages = append(messages, llm.UserMessage(toolResults...))
 	}
 	return messages, fmt.Errorf("reached step limit (%d) without completing", maxSteps)
 }
 
 // runToolUse executes a single tool_use block through the supplied decision
 // function and returns the tool_result block to send back to the model.
-func (a *Agent) runToolUse(ctx context.Context, block anthropic.ContentBlockUnion, decide decideFunc, ev Events) anthropic.ContentBlockParamUnion {
+func (a *Agent) runToolUse(ctx context.Context, block llm.Block, decide decideFunc, ev Events) llm.Block {
 	summary := summarize(block.Name, block.Input)
 	ev.toolCall(block.Name, summary)
 
@@ -146,23 +156,23 @@ func (a *Agent) runToolUse(ctx context.Context, block anthropic.ContentBlockUnio
 	if !ok {
 		msg := "unknown tool: " + block.Name
 		ev.toolResult(block.Name, msg, true)
-		return anthropic.NewToolResultBlock(block.ID, msg, true)
+		return llm.ToolResultBlock(block.ID, msg, true)
 	}
 
 	if allow, denyMsg := decide(block, summary, t); !allow {
 		ev.denied(block.Name, summary)
 		// StopTurn-style: tell the model why so it can adapt instead of looping.
-		return anthropic.NewToolResultBlock(block.ID, denyMsg, true)
+		return llm.ToolResultBlock(block.ID, denyMsg, true)
 	}
 
 	res, err := t.Run(ctx, block.Input)
 	if err != nil {
 		msg := "tool error: " + err.Error()
 		ev.toolResult(block.Name, msg, true)
-		return anthropic.NewToolResultBlock(block.ID, msg, true)
+		return llm.ToolResultBlock(block.ID, msg, true)
 	}
 	ev.toolResult(block.Name, res.Content, res.IsError)
-	return anthropic.NewToolResultBlock(block.ID, res.Content, res.IsError)
+	return llm.ToolResultBlock(block.ID, res.Content, res.IsError)
 }
 
 // summarize renders a short, human-readable description of a tool call for

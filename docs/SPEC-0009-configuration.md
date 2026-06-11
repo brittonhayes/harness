@@ -7,8 +7,8 @@
 |---|---|
 | **ID** | SPEC-0009 |
 | **Status** | Stable |
-| **Updated** | 2026-06-09 |
-| **Source of truth** | `internal/config/config.go`, `internal/config/save.go` |
+| **Updated** | 2026-06-11 |
+| **Source of truth** | `internal/config/config.go`, `internal/config/save.go`, `internal/llm/new.go`, `internal/llm/registry.go`, `internal/auth/auth.go` |
 | **Depends on** | SPEC-0002 |
 
 ## 1. Purpose & scope
@@ -46,14 +46,20 @@ specs that consume them (model/compaction to
 
 ### Secrets
 
-- **R-0009-04** The Anthropic API key MUST come only from `ANTHROPIC_API_KEY`
-  and MUST NOT be persisted to any config file.
+- **R-0009-04** A provider API key MUST come only from the environment (the
+  provider's key variable, e.g. `ANTHROPIC_API_KEY` / `OPENAI_API_KEY`) or the
+  credential store, and MUST NOT be persisted to any config file. The credential
+  store is `~/.config/vala/auth.json` (mode `0600`), written by `vala connect`;
+  the environment variable, when set, MUST take precedence over the store.
 - **R-0009-05** Each MCP server's bearer token MUST be resolved at load time from
   the server's `api_key_env` variable and MUST NOT be persisted.
+- **R-0009-10** A non-local provider with no key (neither environment nor store)
+  MUST surface as a recoverable "not connected" condition so the interactive
+  session can launch and offer `/connect`, while unattended runs fail closed.
 
 ### Defaults
 
-- **R-0009-06** Defaults MUST be: `model=claude-opus-4-8`, `max_tokens=8192`,
+- **R-0009-06** Defaults MUST be: `provider=anthropic`, `model=claude-opus-4-8`, `max_tokens=8192`,
   `permission=ask`, `detections_dir=detections`, `max_steps=50`,
   `context_window=200000`, `auto_compact_threshold=0.80`, empty `notion`, empty
   `mcp`, nil `allowlist`.
@@ -75,6 +81,8 @@ specs that consume them (model/compaction to
 
 | Field (JSON) | Type | Default | Env override | Consumed by |
 |---|---|---|---|---|
+| `provider` | string | `anthropic` | `VALA_PROVIDER` | SPEC-0008 |
+| `providers` | map[string]ProviderConfig | empty | — | SPEC-0008 |
 | `model` | string | `claude-opus-4-8` | `VALA_MODEL` | SPEC-0008 |
 | `max_tokens` | int64 | `8192` | — | SPEC-0008 |
 | `permission` | string | `ask` | `VALA_PERMISSION` | SPEC-0011 |
@@ -91,7 +99,8 @@ specs that consume them (model/compaction to
 
 | Variable | Effect |
 |---|---|
-| `ANTHROPIC_API_KEY` | the LLM API key (required; never persisted) |
+| `<provider>_API_KEY` | the active provider's key (e.g. `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`); never persisted, takes precedence over the credential store |
+| `VALA_PROVIDER` | override `provider` |
 | `VALA_MODEL` | override `model` |
 | `VALA_PERMISSION` | override `permission` (`ask`/`allow`/`deny`) |
 | `VALA_CONTEXT_WINDOW` | override `context_window` (int; malformed ignored) |
@@ -107,6 +116,46 @@ specs that consume them (model/compaction to
 ```
 
 `api_key` is never written; it is resolved from `api_key_env` at load.
+
+### Providers & model resolution
+
+vala supports any provider speaking one of two wire protocols — `anthropic`
+(Anthropic Messages) or `openai` (OpenAI Chat Completions). Built-in providers
+(`anthropic`, `openai`, `google`, `openrouter`, `groq`, `deepseek`, `xai`,
+`ollama`, `lmstudio`) need no config. The `providers` map overrides a built-in or
+defines a new OpenAI-compatible provider:
+
+```json
+"providers": {
+  "mygateway": {
+    "base_url": "https://gateway.internal/v1",
+    "protocol": "openai",
+    "api_key_env": "GATEWAY_KEY",
+    "model": "my-model",
+    "local": false
+  }
+}
+```
+
+- **R-0009-11** The active provider is `provider`; the active model is `model`,
+  interpreted within that provider. When `provider` is empty, a `provider/model`
+  prefix in `model` selects the provider only if the prefix is a known built-in
+  (so OpenRouter slugs like `anthropic/claude-opus-4-8` stay intact); otherwise
+  the provider defaults to `anthropic`. An empty `model` uses the provider's
+  default model.
+- **R-0009-12** A `providers` entry overrides the matching built-in field by
+  field; an entry with no matching built-in defines a provider outright, with the
+  `openai` protocol assumed and `base_url` required.
+
+### Credential store (`~/.config/vala/auth.json`)
+
+```json
+{ "providers": { "openai": { "type": "api", "key": "...", "model": "gpt-5" } } }
+```
+
+Written by `vala connect` (and `/connect`) at mode `0600`. `base_url` may be set
+for a local or custom provider; `key` is omitted for local providers. Secrets
+never appear in `config.json` / `.vala.json`.
 
 ### Notion IDs (`brain.DBIDs`)
 
@@ -124,6 +173,7 @@ overlays only the `notion` key, pretty-printed, creating the file if absent).
 
 ```json
 {
+  "provider": "anthropic",
   "model": "claude-opus-4-8",
   "permission": "ask",
   "detections_dir": "detections",

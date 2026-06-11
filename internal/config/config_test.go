@@ -12,6 +12,49 @@ func TestDefaultCompactionSettings(t *testing.T) {
 	}
 }
 
+func TestDefaultProvider(t *testing.T) {
+	cfg := Default()
+	if cfg.Provider != "anthropic" {
+		t.Errorf("Provider = %q, want anthropic", cfg.Provider)
+	}
+	if cfg.Model != "claude-opus-4-8" {
+		t.Errorf("Model = %q, want claude-opus-4-8", cfg.Model)
+	}
+}
+
+func TestLoadProviderEnvOverride(t *testing.T) {
+	t.Setenv("VALA_PROVIDER", "openai")
+	t.Setenv("VALA_MODEL", "gpt-5")
+	cfg, err := Load(t.TempDir())
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Provider != "openai" || cfg.Model != "gpt-5" {
+		t.Errorf("got provider %q model %q, want openai/gpt-5", cfg.Provider, cfg.Model)
+	}
+}
+
+func TestSaveProviderPreservesOtherKeys(t *testing.T) {
+	dir := t.TempDir()
+	// Seed an unrelated key, then SaveProvider must leave it intact.
+	if err := saveKey(dir, "detections_dir", "rules"); err != nil {
+		t.Fatal(err)
+	}
+	if err := SaveProvider(dir, "google", "gemini-2.5-pro"); err != nil {
+		t.Fatalf("SaveProvider: %v", err)
+	}
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Provider != "google" || cfg.Model != "gemini-2.5-pro" {
+		t.Errorf("provider/model not saved: %q/%q", cfg.Provider, cfg.Model)
+	}
+	if cfg.DetectionsDir != "rules" {
+		t.Errorf("unrelated key clobbered: detections_dir = %q", cfg.DetectionsDir)
+	}
+}
+
 func TestLoadCompactionEnvOverrides(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("VALA_CONTEXT_WINDOW", "50000")

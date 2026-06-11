@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/anthropics/anthropic-sdk-go"
+	"github.com/brittonhayes/vala/internal/llm"
 	"github.com/brittonhayes/vala/internal/session"
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/spinner"
@@ -34,7 +34,7 @@ type toolResultMsg struct {
 }
 type deniedMsg struct{ name string }
 type turnDoneMsg struct {
-	history []anthropic.MessageParam
+	history []llm.Message
 	err     error
 }
 
@@ -43,7 +43,7 @@ type usageMsg struct{ input, output int64 }
 
 // compactDoneMsg reports the result of a /compact or auto-compaction run.
 type compactDoneMsg struct {
-	history []anthropic.MessageParam
+	history []llm.Message
 	summary string
 	auto    bool // true when triggered by auto-compaction rather than /compact
 	err     error
@@ -70,9 +70,9 @@ type chatModel struct {
 	width, height int
 	ready         bool
 
-	blocks  []string                 // rendered transcript blocks, top to bottom
-	history []anthropic.MessageParam // conversation carried across turns
-	queue   []string                 // messages typed while a turn is running
+	blocks  []string      // rendered transcript blocks, top to bottom
+	history []llm.Message // conversation carried across turns
+	queue   []string      // messages typed while a turn is running
 
 	running    bool
 	compacting bool // a compaction LLM call is in flight
