@@ -3,6 +3,7 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -66,7 +67,12 @@ single non-interactive task.`,
 		}
 		ag := agent.New(built.client, built.registry, built.gate, built.cwd, built.cfg.MaxSteps,
 			sessionContext(cmd.Context(), built.cwd, built.rc.Brain))
-		repl := ui.New(ag, built.gate, sess, built.client.Model(), built.cfg.ContextWindow, built.cfg.AutoCompactThreshold)
+		repl := ui.New(ag, built.gate, sess, modelLabel(built.client), contextWindow(built.client, built.cfg), built.cfg.AutoCompactThreshold)
+		// Wire /connect: rebuild a provider from the latest stored credentials so
+		// the operator can connect or switch providers without leaving the session.
+		repl.Connect = func(provider, model string) (llm.Provider, error) {
+			return reconnect(built.cfg, provider, model)
+		}
 		return repl.Run(cmd.Context())
 	},
 }
@@ -91,10 +97,14 @@ func init() {
 type built struct {
 	cfg      config.Config
 	cwd      string
-	client   *llm.Client
+	client   llm.Provider
 	registry *tool.Registry
 	gate     *permission.Gate
 	rc       *tools.RunContext
+	// connectErr is set (and client left nil) when no provider credential is
+	// available yet, so the interactive REPL can launch and offer /connect while
+	// unattended commands can fail closed.
+	connectErr error
 }
 
 // resolveConfig loads config for the current directory and applies persistent
@@ -126,9 +136,17 @@ func build() (*built, error) {
 	if err != nil {
 		return nil, err
 	}
+	// A missing provider credential is not fatal: the interactive REPL launches
+	// anyway so the operator can run /connect. Any other construction error
+	// (malformed config, unknown provider) still fails.
 	client, err := llm.New(cfg)
+	var connectErr error
 	if err != nil {
-		return nil, err
+		if !errors.Is(err, llm.ErrNoCredentials) {
+			return nil, err
+		}
+		connectErr = err
+		client = nil
 	}
 	gate := permission.New(permission.Parse(cfg.Permission), cfg.Allowlist)
 
@@ -142,7 +160,39 @@ func build() (*built, error) {
 	rc.Author = resolveAuthor()
 	registry := tools.Toolbox(cwd, rc, evidence...)
 
-	return &built{cfg: cfg, cwd: cwd, client: client, registry: registry, gate: gate, rc: rc}, nil
+	return &built{cfg: cfg, cwd: cwd, client: client, registry: registry, gate: gate, rc: rc, connectErr: connectErr}, nil
+}
+
+// modelLabel renders the active provider and model for the session banner,
+// e.g. "anthropic · claude-opus-4-8", or a connect hint when no provider is
+// wired up yet.
+func modelLabel(p llm.Provider) string {
+	if p == nil {
+		return "not connected · /connect to choose a provider"
+	}
+	return p.Provider() + " · " + p.Model()
+}
+
+// contextWindow returns the token budget that drives auto-compaction. It prefers
+// the provider's known window for the active model (from the embedded catalog)
+// and falls back to the configured value for models vala does not recognize (or
+// when no provider is connected yet).
+func contextWindow(p llm.Provider, cfg config.Config) int64 {
+	if p != nil {
+		if w := p.ContextWindow(); w > 0 {
+			return w
+		}
+	}
+	return cfg.ContextWindow
+}
+
+// reconnect builds a fresh provider for an in-session /connect switch. It reads
+// the latest stored credentials, so a key saved moments earlier is picked up.
+func reconnect(base config.Config, provider, model string) (llm.Provider, error) {
+	c := base
+	c.Provider = provider
+	c.Model = model
+	return llm.New(c)
 }
 
 // brainStore selects the brain backend: an NTN-backed store when Notion DB IDs

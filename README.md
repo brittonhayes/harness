@@ -18,16 +18,22 @@
 
 Point it at your data lake, describe the work, and walk away. Every hunt, every
 finding, every detection lands in a Notion-backed brain so the next hunt builds
-on the last. It runs on Anthropic's Claude and needs **no external detection
-toolchain** — Sigma rules are validated and unit-tested offline, inside the
-binary.
+on the last. It is **provider-agnostic** — run it on Anthropic's Claude, OpenAI,
+Google Gemini, OpenRouter, or a local model — and needs **no external detection
+toolchain**: Sigma rules are validated and unit-tested offline, inside the binary.
 
 ## Install
 
 ```sh
 go install github.com/brittonhayes/vala/cmd/vala@latest
-export ANTHROPIC_API_KEY=sk-ant-...
+vala connect    # pick a provider and paste a key — or point at a local model
 ```
+
+`vala connect` is the one-time setup: choose Anthropic, OpenAI, Google,
+OpenRouter, Groq, DeepSeek, xAI, or a local runtime (Ollama, LM Studio), and
+vala stores the credential and remembers your choice. Already have a key in your
+environment (e.g. `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`)? vala picks it up
+automatically — no connect step needed.
 
 <details>
 <summary>Build from source</summary>
@@ -53,6 +59,7 @@ the conversation itself:
 | Command | What it does |
 | --- | --- |
 | `/help` | List the commands. |
+| `/connect [provider]` | Choose or switch the model provider mid-session; lists providers when bare. |
 | `/clear` | Wipe the context and transcript, keep the banner. |
 | `/compact [focus]` | Summarize the session into a tight recap and keep going; `focus` steers it. |
 
@@ -67,6 +74,44 @@ vala run "validate and test every rule in my detections directory, report failur
 > vala also auto-compacts as a turn approaches the context window (80% by
 > default) so long sessions never run out of room — tune it with
 > `context_window` / `auto_compact_threshold`, or set either to `0` to turn it off.
+
+## Choose your provider
+
+vala talks to whatever model backend you point it at. One binary, any provider:
+
+```sh
+vala connect              # guided picker (masked key entry)
+vala connect openai       # jump straight to a provider
+vala connect ollama       # point at a local server — no key needed
+```
+
+| Provider | Models | Auth |
+| --- | --- | --- |
+| `anthropic` | Claude (Opus, Sonnet, Haiku) | `ANTHROPIC_API_KEY` |
+| `openai` | GPT-5, GPT-4.1, o4-mini | `OPENAI_API_KEY` |
+| `google` | Gemini 2.5 Pro/Flash | `GEMINI_API_KEY` |
+| `openrouter` | any model, one key | `OPENROUTER_API_KEY` |
+| `groq` · `deepseek` · `xai` | Llama, DeepSeek, Grok | provider key |
+| `ollama` · `lmstudio` | local models | none (local server) |
+
+Under the hood there are just two wire protocols — Anthropic Messages and OpenAI
+Chat Completions — so every OpenAI-compatible endpoint (including local servers
+and private gateways) works by pointing at a base URL. Switch providers live in
+a session with `/connect`; the conversation carries over. Define a custom
+OpenAI-compatible provider under `providers` in `.vala.json`:
+
+```json
+{
+  "provider": "mygateway",
+  "model": "my-model",
+  "providers": {
+    "mygateway": { "base_url": "https://gateway.internal/v1", "api_key_env": "GATEWAY_KEY" }
+  }
+}
+```
+
+Credentials live in `~/.config/vala/auth.json` (mode `0600`), never in the
+project config; environment variables always take precedence.
 
 ## Give it a brain
 
@@ -189,11 +234,13 @@ reference rules under
 
 Settings layer lowest-priority first: built-in defaults →
 `~/.config/vala/config.json` → `./.vala.json` → environment variables
-(`ANTHROPIC_API_KEY`, `VALA_MODEL`, `VALA_PERMISSION`, `VALA_CONTEXT_WINDOW`,
-`VALA_AUTO_COMPACT_THRESHOLD`, `SCANNER_MCP_URL`, `SCANNER_API_KEY`).
+(`VALA_PROVIDER`, `VALA_MODEL`, `VALA_PERMISSION`, `VALA_CONTEXT_WINDOW`,
+`VALA_AUTO_COMPACT_THRESHOLD`, `SCANNER_MCP_URL`, `SCANNER_API_KEY`, and each
+provider's own key env such as `ANTHROPIC_API_KEY` / `OPENAI_API_KEY`).
 
 ```json
 {
+  "provider": "anthropic",
   "model": "claude-opus-4-8",
   "permission": "ask",
   "detections_dir": "detections",

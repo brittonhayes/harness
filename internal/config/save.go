@@ -15,6 +15,20 @@ func SaveNotion(cwd string, ids brain.DBIDs) error {
 	return saveKey(cwd, "notion", ids)
 }
 
+// SaveProvider records the chosen provider id and model in the project's
+// .vala.json so the next launch uses them, preserving every other key. An empty
+// model leaves the existing "model" key untouched (the provider's default
+// applies). Secrets are never written here — only the provider id and model.
+func SaveProvider(cwd, provider, model string) error {
+	if err := saveKey(cwd, "provider", provider); err != nil {
+		return err
+	}
+	if model != "" {
+		return saveKey(cwd, "model", model)
+	}
+	return nil
+}
+
 // SaveBrainFile records the local brain-file path in .vala.json (the
 // "brain_file" key) so a file-backed brain persists across runs without a Notion
 // account, preserving every other key.

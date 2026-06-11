@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/anthropics/anthropic-sdk-go"
+	"github.com/brittonhayes/vala/internal/llm"
 )
 
 // continuationPreamble frames the compacted history so the model treats the
@@ -24,16 +24,19 @@ const summaryRequest = "Summarize our conversation so far using the required str
 // for display. focus is optional extra guidance from the operator (the argument
 // to /compact). An empty history is a no-op: it returns history unchanged with
 // an empty summary and a nil error.
-func (a *Agent) Compact(ctx context.Context, history []anthropic.MessageParam, focus string) (newHistory []anthropic.MessageParam, summary string, err error) {
+func (a *Agent) Compact(ctx context.Context, history []llm.Message, focus string) (newHistory []llm.Message, summary string, err error) {
 	if len(history) == 0 {
 		return history, "", nil
+	}
+	if a.llm == nil {
+		return history, "", fmt.Errorf("no model provider connected — run /connect to choose one")
 	}
 
 	req := summaryRequest
 	if f := strings.TrimSpace(focus); f != "" {
 		req += "\n\nAdditional focus from the operator: " + f
 	}
-	messages := append(history, anthropic.NewUserMessage(anthropic.NewTextBlock(req)))
+	messages := append(history, llm.UserText(req))
 
 	// Summarization is a single, tool-free completion — never the tool loop.
 	resp, err := a.llm.Complete(ctx, compactionSystemPrompt(), messages, nil)
@@ -43,7 +46,7 @@ func (a *Agent) Compact(ctx context.Context, history []anthropic.MessageParam, f
 
 	var b strings.Builder
 	for _, block := range resp.Content {
-		if block.Type == "text" {
+		if block.Type == llm.BlockText {
 			b.WriteString(block.Text)
 		}
 	}
@@ -58,9 +61,9 @@ func (a *Agent) Compact(ctx context.Context, history []anthropic.MessageParam, f
 // buildContinuationHistory seeds a fresh history with a single user message that
 // embeds the summary behind the continuation preamble. A single user-role seed
 // keeps the next Complete call well-formed and mirrors Claude Code's pattern.
-func buildContinuationHistory(summary string) []anthropic.MessageParam {
-	return []anthropic.MessageParam{
-		anthropic.NewUserMessage(anthropic.NewTextBlock(continuationPreamble + summary)),
+func buildContinuationHistory(summary string) []llm.Message {
+	return []llm.Message{
+		llm.UserText(continuationPreamble + summary),
 	}
 }
 

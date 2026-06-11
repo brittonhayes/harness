@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/brittonhayes/vala/internal/agent"
+	"github.com/brittonhayes/vala/internal/llm"
 	"github.com/brittonhayes/vala/internal/permission"
 	"github.com/brittonhayes/vala/internal/session"
 	tea "github.com/charmbracelet/bubbletea"
@@ -29,6 +30,11 @@ type REPL struct {
 	// the session compacts before continuing. A non-positive value disables it.
 	ContextWindow        int64
 	AutoCompactThreshold float64
+
+	// Connect rebuilds a provider for the given provider id and model from the
+	// latest stored credentials. /connect calls it to wire up or switch providers
+	// mid-session. Nil disables /connect's live switching.
+	Connect func(provider, model string) (llm.Provider, error)
 
 	styles  Styles
 	program *tea.Program

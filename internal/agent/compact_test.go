@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/anthropics/anthropic-sdk-go"
+	"github.com/brittonhayes/vala/internal/llm"
 )
 
 // TestCompactEmptyHistory verifies the empty-history short-circuit: it must be a
@@ -49,14 +49,14 @@ func TestBuildContinuationHistory(t *testing.T) {
 	if len(hist) != 1 {
 		t.Fatalf("buildContinuationHistory len = %d, want 1", len(hist))
 	}
-	if hist[0].Role != anthropic.MessageParamRoleUser {
+	if hist[0].Role != llm.RoleUser {
 		t.Fatalf("seed role = %q, want user", hist[0].Role)
 	}
 	// The single text block must carry both the preamble and the summary.
 	var got string
 	for _, block := range hist[0].Content {
-		if block.OfText != nil {
-			got += block.OfText.Text
+		if block.Type == llm.BlockText {
+			got += block.Text
 		}
 	}
 	if !strings.Contains(got, continuationPreamble) {

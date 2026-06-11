@@ -44,6 +44,11 @@ permission gate ([SPEC-0011](SPEC-0011-permissions-and-safety.md)).
   Notion CLI.
 - **R-0010-04** `vala version` MUST print the build version (set via `-ldflags`,
   falling back to VCS info or `dev`).
+- **R-0010-12** `vala connect [provider]` MUST guide the operator through
+  selecting a provider and entering a credential (a masked API key for remote
+  providers, a base URL for local ones), persist the credential to the store
+  (`~/.config/vala/auth.json`) and the chosen `provider`/`model` to `./.vala.json`
+  (see [SPEC-0009](SPEC-0009-configuration.md)). A named provider preselects it.
 
 ### Flags
 
@@ -69,6 +74,11 @@ permission gate ([SPEC-0011](SPEC-0011-permissions-and-safety.md)).
 
 ### REPL commands
 
+- **R-0010-13** The interactive session MUST provide `/connect [provider]`: bare,
+  it lists providers and their connection state; with a provider id it switches
+  the active provider live (carrying the conversation), optionally storing an
+  inline credential. When no provider is connected at startup, the REPL MUST
+  still launch so `/connect` can wire one up.
 - **R-0010-11** The interactive session MUST provide `/help` (list commands),
   `/clear` (wipe context and transcript, keep the banner), and `/compact
   [focus]` (summarize and continue, steered by optional focus — see
@@ -83,6 +93,7 @@ permission gate ([SPEC-0011](SPEC-0011-permissions-and-safety.md)).
 |---|---|---|
 | `vala` | interactive REPL | persistent flags below |
 | `vala run <prompt...>` | one-shot task | `--yes`, + persistent |
+| `vala connect [provider]` | connect/select an LLM provider | + persistent |
 | `vala init` | provision Notion brain | `--parent`, `--force`, + persistent |
 | `vala version` | print version | — |
 
@@ -106,6 +117,7 @@ brain is configured, else `Mem`.
 | Command | Effect |
 |---|---|
 | `/help` | list the commands |
+| `/connect [provider]` | list providers, or switch the active provider live (optionally storing an inline credential) |
 | `/clear` | wipe context and transcript, keep the banner |
 | `/compact [focus]` | summarize the session and continue; `focus` steers the summary |
 

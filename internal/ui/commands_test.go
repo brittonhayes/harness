@@ -1,10 +1,53 @@
 package ui
 
 import (
+	"context"
 	"testing"
 
-	"github.com/anthropics/anthropic-sdk-go"
+	"github.com/brittonhayes/vala/internal/agent"
+	"github.com/brittonhayes/vala/internal/llm"
+	"github.com/brittonhayes/vala/internal/permission"
+	"github.com/brittonhayes/vala/internal/tool"
 )
+
+// fakeProvider is a stand-in llm.Provider for exercising /connect without a
+// network call.
+type fakeProvider struct{}
+
+func (fakeProvider) Complete(context.Context, string, []llm.Message, []llm.ToolDef) (*llm.Response, error) {
+	return &llm.Response{}, nil
+}
+func (fakeProvider) Model() string        { return "fake-model" }
+func (fakeProvider) Provider() string     { return "fakeprov" }
+func (fakeProvider) ContextWindow() int64 { return 1000 }
+
+func TestConnectSwitchesProviderLive(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	m := newTestModel(t)
+	m.repl.Agent = agent.New(nil, tool.NewRegistry(), permission.New(permission.ModeAsk, nil), "", 1, "")
+	if m.repl.Agent.Connected() {
+		t.Fatal("agent should start disconnected")
+	}
+	m.repl.Connect = func(provider, model string) (llm.Provider, error) { return fakeProvider{}, nil }
+
+	res, _ := m.cmdConnect("anthropic")
+	mm := res.(chatModel)
+	if !mm.repl.Agent.Connected() {
+		t.Fatal("agent should be connected after /connect")
+	}
+	if mm.repl.Model != "fakeprov · fake-model" {
+		t.Errorf("banner model = %q, want fakeprov · fake-model", mm.repl.Model)
+	}
+}
+
+func TestConnectUnknownProviderIsHandled(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	m := newTestModel(t)
+	// No panic even with a nil Agent: an unknown provider never reaches the swap.
+	if _, _, handled := m.dispatchSlash("/connect nope-nope"); !handled {
+		t.Fatal("/connect with unknown provider should be handled")
+	}
+}
 
 func TestSplitCommand(t *testing.T) {
 	tests := []struct {
@@ -27,12 +70,15 @@ func TestSplitCommand(t *testing.T) {
 }
 
 func TestDispatchSlashHandling(t *testing.T) {
+	// Keep /connect's provider listing hermetic — read from an empty temp config.
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	tests := []struct {
 		in          string
 		wantHandled bool
 	}{
 		{"hunt for root logins", false}, // not a slash command
 		{"/help", true},
+		{"/connect", true},
 		{"/clear", true},
 		{"/compact", true},
 		{"/bogus", true}, // unknown command is still "handled" (reports an error)
@@ -48,7 +94,7 @@ func TestDispatchSlashHandling(t *testing.T) {
 
 func TestClearResetsContext(t *testing.T) {
 	m := newTestModel(t)
-	m.history = []anthropic.MessageParam{anthropic.NewUserMessage(anthropic.NewTextBlock("hi"))}
+	m.history = []llm.Message{llm.UserText("hi")}
 	m.lastInputTokens = 1234
 	m.append("some transcript block")
 
@@ -70,7 +116,7 @@ func TestClearResetsContext(t *testing.T) {
 func TestClearBusyIsNoOp(t *testing.T) {
 	m := newTestModel(t)
 	m.running = true
-	m.history = []anthropic.MessageParam{anthropic.NewUserMessage(anthropic.NewTextBlock("hi"))}
+	m.history = []llm.Message{llm.UserText("hi")}
 
 	res, _ := m.cmdClear("")
 	m = res.(chatModel)
@@ -81,13 +127,13 @@ func TestClearBusyIsNoOp(t *testing.T) {
 }
 
 func TestShouldAutoCompact(t *testing.T) {
-	hist := []anthropic.MessageParam{anthropic.NewUserMessage(anthropic.NewTextBlock("hi"))}
+	hist := []llm.Message{llm.UserText("hi")}
 	tests := []struct {
 		name      string
 		window    int64
 		threshold float64
 		tokens    int64
-		history   []anthropic.MessageParam
+		history   []llm.Message
 		want      bool
 	}{
 		{"below threshold", 1000, 0.8, 700, hist, false},

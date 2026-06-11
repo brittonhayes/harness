@@ -33,6 +33,11 @@ to prompt). Pass --yes to auto-approve every tool call for an unattended run.`,
 		if err != nil {
 			return err
 		}
+		if built.client == nil {
+			// Unattended runs cannot prompt for a provider; surface the connect
+			// error so the operator wires one up first.
+			return built.connectErr
+		}
 		// Non-interactive: no prompter. --yes forces allow; otherwise honor the
 		// configured mode but fail closed (deny) when it would need to ask.
 		if flagYes {
