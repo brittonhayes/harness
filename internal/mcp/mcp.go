@@ -143,7 +143,11 @@ func clientTransport(cfg ServerConfig) (sdk.Transport, error) {
 		if cfg.URL == "" {
 			return nil, fmt.Errorf("mcp server %q: no URL configured", cfg.Name)
 		}
-		t := &sdk.StreamableClientTransport{Endpoint: cfg.URL, HTTPClient: http.DefaultClient}
+		// Disable the standalone server-initiated SSE stream: vala only needs
+		// request/response tool calls, and leaving it on risks an initialize
+		// deadlock with servers that expect the client to read responses on that
+		// stream (observed hanging Connect against Wiz).
+		t := &sdk.StreamableClientTransport{Endpoint: cfg.URL, HTTPClient: http.DefaultClient, DisableStandaloneSSE: true}
 		switch {
 		case cfg.OAuth:
 			// Browser sign-in with token caching; the handler sets the auth header

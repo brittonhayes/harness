@@ -53,8 +53,10 @@ func TestOAuthHandlerEndToEnd(t *testing.T) {
 	as = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/.well-known/oauth-protected-resource":
+			// Advertise the resource with a trailing slash, like Wiz, to guard the
+			// exact-match check the resource identifier must satisfy.
 			writeJSON(w, map[string]any{
-				"resource":              as.URL,
+				"resource":              as.URL + "/",
 				"authorization_servers": []string{as.URL},
 				"scopes_supported":      []string{"read"},
 			})
@@ -104,8 +106,9 @@ func TestOAuthHandlerEndToEnd(t *testing.T) {
 		t.Fatal("expected nil token source before authorization")
 	}
 
-	// Simulate the transport's 401 → Authorize path.
-	req, _ := http.NewRequest("POST", as.URL+"/mcp", nil)
+	// Simulate the transport's 401 → Authorize path against the root endpoint
+	// with a trailing slash (mirrors Wiz's https://mcp.app.wiz.io/).
+	req, _ := http.NewRequest("POST", as.URL+"/", nil)
 	resp := &http.Response{StatusCode: 401, Header: http.Header{}, Body: http.NoBody, Request: req}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()

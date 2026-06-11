@@ -84,7 +84,11 @@ func (h *oauthHandler) Authorize(ctx context.Context, req *http.Request, resp *h
 // runFlow performs discovery, dynamic client registration, the loopback browser
 // authorization, and the code exchange, returning a persistable token record.
 func (h *oauthHandler) runFlow(ctx context.Context, req *http.Request, resp *http.Response) (tokenRecord, error) {
-	resource := (&url.URL{Scheme: req.URL.Scheme, Host: req.URL.Host}).String()
+	// The resource identifier is the MCP endpoint URL exactly as the server
+	// advertises it — including any path or trailing slash. The SDK exact-matches
+	// it against the metadata's "resource" field, so dropping the path (e.g.
+	// "https://host" vs the advertised "https://host/") fails discovery.
+	resource := (&url.URL{Scheme: req.URL.Scheme, Host: req.URL.Host, Path: req.URL.Path}).String()
 
 	// 1. Locate the protected-resource metadata, then the authorization server.
 	prmURL := resourceMetadataURL(resp, req)
@@ -96,7 +100,7 @@ func (h *oauthHandler) runFlow(ctx context.Context, req *http.Request, resp *htt
 		return tokenRecord{}, fmt.Errorf("server advertises no authorization servers")
 	}
 	issuer := prm.AuthorizationServers[0]
-	asm, err := oauthex.GetAuthServerMeta(ctx, authServerMetadataURL(issuer), issuer, h.hc)
+	asm, err := h.discoverAuthServer(ctx, issuer)
 	if err != nil {
 		return tokenRecord{}, fmt.Errorf("discover authorization server: %w", err)
 	}
@@ -238,20 +242,39 @@ func waitForCode(ctx context.Context, ln net.Listener, state string) (string, er
 	}
 }
 
-// authServerMetadataURL derives the RFC 8414 well-known metadata URL for an
-// issuer, inserting the well-known segment after the host and before any path.
-func authServerMetadataURL(issuer string) string {
+// discoverAuthServer fetches an issuer's metadata, trying the RFC 8414 OAuth
+// well-known endpoint first and the OpenID Connect one as a fallback, since the
+// SDK fetches a single URL with no fallback of its own and servers vary.
+func (h *oauthHandler) discoverAuthServer(ctx context.Context, issuer string) (*oauthex.AuthServerMeta, error) {
+	var lastErr error
+	for _, metaURL := range authServerMetadataURLs(issuer) {
+		asm, err := oauthex.GetAuthServerMeta(ctx, metaURL, issuer, h.hc)
+		if err == nil {
+			return asm, nil
+		}
+		lastErr = err
+	}
+	return nil, lastErr
+}
+
+// authServerMetadataURLs returns the candidate metadata URLs for an issuer: the
+// RFC 8414 form (well-known inserted before any path) and the OpenID Connect
+// form (well-known appended after the path).
+func authServerMetadataURLs(issuer string) []string {
 	u, err := url.Parse(issuer)
 	if err != nil {
-		return issuer
+		return []string{issuer}
 	}
-	wellKnown := "/.well-known/oauth-authorization-server"
-	if p := strings.Trim(u.Path, "/"); p != "" {
-		u.Path = wellKnown + "/" + p
+	path := strings.Trim(u.Path, "/")
+	oauthURL := *u
+	if path != "" {
+		oauthURL.Path = "/.well-known/oauth-authorization-server/" + path
 	} else {
-		u.Path = wellKnown
+		oauthURL.Path = "/.well-known/oauth-authorization-server"
 	}
-	return u.String()
+	oidcURL := *u
+	oidcURL.Path = strings.TrimRight(u.Path, "/") + "/.well-known/openid-configuration"
+	return []string{oauthURL.String(), oidcURL.String()}
 }
 
 func randomState() (string, error) {
