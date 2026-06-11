@@ -51,6 +51,17 @@ specs that consume them (model/compaction to
   credential store, and MUST NOT be persisted to any config file. The credential
   store is `~/.config/vala/auth.json` (mode `0600`), written by `vala connect`;
   the environment variable, when set, MUST take precedence over the store.
+- **R-0009-11** A provider MAY be connected with a subscription (OAuth) login
+  instead of an API key. The browser-based PKCE flow stores an
+  `access`/`refresh`/`expiry` triple (credential `type` = `oauth`) in the same
+  `0600` store; no raw key is ever entered or persisted. An OAuth credential
+  MUST be refreshed automatically when within the refresh window of expiry, the
+  rotated tokens written back to the store. When a provider has an OAuth
+  credential, it takes precedence over key lookup. Anthropic (Claude Pro/Max) is
+  the first provider to support this; OAuth-authenticated Messages API requests
+  MUST send the access token as a Bearer credential (never `x-api-key`), attach
+  the `anthropic-beta: oauth-2025-04-20` header, and lead the system prompt with
+  Claude Code's identity block.
 - **R-0009-05** Each MCP server's bearer token MUST be resolved at load time from
   the server's `api_key_env` variable and MUST NOT be persisted.
 - **R-0009-10** A non-local provider with no key (neither environment nor store)
@@ -150,12 +161,19 @@ defines a new OpenAI-compatible provider:
 ### Credential store (`~/.config/vala/auth.json`)
 
 ```json
-{ "providers": { "openai": { "type": "api", "key": "...", "model": "gpt-5" } } }
+{
+  "providers": {
+    "openai": { "type": "api", "key": "...", "model": "gpt-5" },
+    "anthropic": { "type": "oauth", "access": "...", "refresh": "...", "expiry": 1700000000000, "model": "claude-opus-4-8" }
+  }
+}
 ```
 
-Written by `vala connect` (and `/connect`) at mode `0600`. `base_url` may be set
-for a local or custom provider; `key` is omitted for local providers. Secrets
-never appear in `config.json` / `.vala.json`.
+Written by `vala connect` (and `/connect`) at mode `0600`. A `type` of `api`
+holds a key; `type` `oauth` holds a subscription login's `access`/`refresh`
+tokens and `expiry` (Unix ms), refreshed in place as needed. `base_url` may be
+set for a local or custom provider; `key` is omitted for local providers.
+Secrets never appear in `config.json` / `.vala.json`.
 
 ### Notion IDs (`brain.DBIDs`)
 

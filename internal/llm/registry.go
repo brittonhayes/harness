@@ -35,6 +35,10 @@ type ProviderInfo struct {
 	// Local marks a provider that runs on the operator's machine and needs no
 	// API key (Ollama, LM Studio). The connect flow asks for a base URL instead.
 	Local bool
+	// OAuth marks a provider that supports a browser-based subscription login
+	// (e.g. Claude Pro/Max), letting an operator connect without a raw API key.
+	// The connect flow offers it as an alternative to pasting a key.
+	OAuth bool
 }
 
 // builtins is vala's registry of known providers. The OpenAI-compatible entries
@@ -43,7 +47,7 @@ var builtins = map[string]ProviderInfo{
 	"anthropic": {
 		ID: "anthropic", Name: "Anthropic (Claude)",
 		Protocol: ProtocolAnthropic, APIKeyEnv: "ANTHROPIC_API_KEY",
-		DefaultModel: "claude-opus-4-8",
+		DefaultModel: "claude-opus-4-8", OAuth: true,
 	},
 	"openai": {
 		ID: "openai", Name: "OpenAI (ChatGPT)",

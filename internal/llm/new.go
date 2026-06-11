@@ -1,12 +1,15 @@
 package llm
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/brittonhayes/vala/internal/auth"
+	"github.com/brittonhayes/vala/internal/auth/oauth"
 	"github.com/brittonhayes/vala/internal/config"
 )
 
@@ -63,6 +66,22 @@ func New(cfg config.Config) (Provider, error) {
 		baseURL = cred.BaseURL
 	}
 
+	contextWindow := contextWindowFor(providerID, model)
+
+	// A subscription (OAuth) login takes precedence over key lookup: the operator
+	// connected with their plan instead of a raw key. Only the Anthropic protocol
+	// supports it today.
+	if cred.IsOAuth() {
+		if info.Protocol != ProtocolAnthropic {
+			return nil, fmt.Errorf("provider %q does not support OAuth login", providerID)
+		}
+		token, err := freshOAuthToken(store, providerID, cred)
+		if err != nil {
+			return nil, err
+		}
+		return newAnthropicOAuth(token, baseURL, model, cfg.MaxTokens, contextWindow), nil
+	}
+
 	// Key precedence: environment variable → stored credential.
 	apiKey := ""
 	if info.APIKeyEnv != "" {
@@ -75,8 +94,6 @@ func New(cfg config.Config) (Provider, error) {
 		return nil, &NoCredentialsError{Provider: providerID, EnvVar: info.APIKeyEnv}
 	}
 
-	contextWindow := contextWindowFor(providerID, model)
-
 	switch info.Protocol {
 	case ProtocolAnthropic:
 		return newAnthropic(apiKey, baseURL, model, cfg.MaxTokens, contextWindow), nil
@@ -85,6 +102,48 @@ func New(cfg config.Config) (Provider, error) {
 	default:
 		return nil, fmt.Errorf("provider %q has unknown protocol %q", providerID, info.Protocol)
 	}
+}
+
+// oauthRefreshWindow is how long before expiry vala proactively refreshes an
+// access token, so a token does not lapse mid-session.
+const oauthRefreshWindow = 5 * time.Minute
+
+// freshOAuthToken returns a usable access token for an OAuth credential,
+// refreshing and persisting it when it is missing or within the refresh window
+// of expiry. A failed refresh with no still-valid access token is a hard error,
+// pointing the operator back at `vala connect`.
+func freshOAuthToken(store *auth.Store, providerID string, cred auth.Credential) (string, error) {
+	expiry := time.UnixMilli(cred.Expiry)
+	fresh := cred.Access != "" && cred.Expiry > 0 && time.Now().Before(expiry.Add(-oauthRefreshWindow))
+	if fresh {
+		return cred.Access, nil
+	}
+	if cred.Refresh == "" {
+		if cred.Access != "" {
+			return cred.Access, nil // no refresh token; use what we have
+		}
+		return "", &NoCredentialsError{Provider: providerID}
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	tok, err := oauth.AnthropicRefresh(ctx, cred.Refresh)
+	if err != nil {
+		if cred.Access != "" && time.Now().Before(expiry) {
+			return cred.Access, nil // refresh failed but current token still valid
+		}
+		return "", fmt.Errorf("refresh %s login (run `vala connect`): %w", providerID, err)
+	}
+
+	cred.Access = tok.Access
+	if tok.Refresh != "" {
+		cred.Refresh = tok.Refresh
+	}
+	cred.Expiry = tok.Expiry.UnixMilli()
+	if err := store.Set(providerID, cred); err != nil {
+		return "", fmt.Errorf("persist refreshed token: %w", err)
+	}
+	return cred.Access, nil
 }
 
 // resolveModel determines the active provider id and model from config. The
