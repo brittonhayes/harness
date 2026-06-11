@@ -10,6 +10,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/brittonhayes/vala/internal/brain"
 	"github.com/brittonhayes/vala/internal/config"
 	"github.com/brittonhayes/vala/internal/llm"
 	"github.com/brittonhayes/vala/internal/mcp"
@@ -32,7 +33,9 @@ const (
 	screenProviderLocal
 	screenProviderBusy
 	screenBrainPick
-	screenBrainNotion
+	screenBrainNotionPage // parent-page prompt before a fresh provision
+	screenBrainNotionBusy // provisioning/repairing the Notion brain
+	screenBrainNotionDone // provision/repair result
 	screenEvidencePick
 	screenEvidenceForm
 	screenEvidenceBusy
@@ -50,6 +53,14 @@ type Options struct {
 	Brain      string   // current brain summary (e.g. "on-disk" / "Notion" / "none")
 	Evidence   []string // names of evidence sources already configured in .vala.json
 	Force      bool     // unused hook for future "show all" behavior
+
+	// Notion is the brain's currently-configured Notion IDs (empty when no Notion
+	// brain is set up). The Notion sub-flow uses it to decide between repairing an
+	// existing database in place and provisioning a new one.
+	Notion brain.DBIDs
+	// BrainNeedsRepair is set when the caller detected a configured-but-incomplete
+	// Notion brain, so the wizard opens straight into the Notion repair path.
+	BrainNeedsRepair bool
 }
 
 // Result reports what the operator decided so the caller can finish the work
@@ -61,6 +72,9 @@ type Result struct {
 	// BrainLocal is true when the operator chose the on-disk brain; the caller
 	// provisions it with its existing helper (which also scaffolds VALA.md).
 	BrainLocal bool
+	// BrainNotion is true when the wizard provisioned or repaired the Notion brain
+	// (the IDs are already saved to .vala.json); the caller scaffolds VALA.md.
+	BrainNotion bool
 }
 
 // Run launches the wizard and blocks until the operator finishes or skips it.
@@ -108,6 +122,11 @@ type model struct {
 	// live checklist status, updated as steps complete.
 	providerDone bool
 	brainDone    bool
+
+	// Notion brain sub-flow state.
+	notionMissing []string // stores to repair (from Verify)
+	notionMsg     string   // success/repair summary for the result screen
+	notionErr     error    // provisioning/repair failure for the result screen
 
 	busyLabel string
 	result    Result

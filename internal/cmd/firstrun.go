@@ -26,13 +26,29 @@ func brainConfigured(cfg config.Config) bool {
 	return n.Hunts != "" || n.Intel != "" || n.Evidence != ""
 }
 
+// brainComplete reports whether a Notion brain has every store's data source
+// configured. A configured-but-incomplete brain (e.g. a project provisioned
+// before "coverage" existed) is the broken state that makes UpdateCoverage issue
+// API calls against an empty data-source ID — so setup treats it as needing
+// repair rather than ready. It checks only the per-store IDs, not the parent
+// database, so a working legacy multi-database brain still reads as complete.
+func brainComplete(cfg config.Config) bool {
+	n := cfg.Notion
+	for _, id := range []string{n.Evidence, n.Hunts, n.Intel, n.Detections, n.Backlog, n.Memory, n.Coverage} {
+		if id == "" {
+			return false
+		}
+	}
+	return true
+}
+
 // firstRunNotice is the non-interactive setup check used by `vala run`. It
 // enforces --require-brain and, when a surface is unconfigured, prints a concise
 // stderr summary and continues so automation is never blocked. The interactive
 // REPL uses the onboarding wizard (maybeRunSetup) instead.
 func firstRunNotice(cfg config.Config, cwd string) error {
 	if flagRequireBrain && !(brainConfigured(cfg) || cfg.BrainFile != "") {
-		return fmt.Errorf("no brain is configured; run `vala init` (or unset --require-brain)")
+		return fmt.Errorf("no brain is configured; run `vala setup` (or unset --require-brain)")
 	}
 	if setupComplete(cfg) || flagNoInitPrompt || initPromptDismissed(cwd) {
 		return nil
@@ -42,7 +58,9 @@ func firstRunNotice(cfg config.Config, cwd string) error {
 		gaps = append(gaps, "no model provider connected (run `vala connect`)")
 	}
 	if !(brainConfigured(cfg) || cfg.BrainFile != "") {
-		gaps = append(gaps, "no brain — findings will not persist (run `vala init`)")
+		gaps = append(gaps, "no brain — findings will not persist (run `vala setup`)")
+	} else if brainConfigured(cfg) && !brainComplete(cfg) {
+		gaps = append(gaps, "Notion brain is incomplete — some stores are missing (run `vala setup` to repair)")
 	}
 	if !evidenceConfigured(cfg) {
 		gaps = append(gaps, "no evidence sources — nothing to hunt in (run `vala setup`)")

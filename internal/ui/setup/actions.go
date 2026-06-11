@@ -8,6 +8,7 @@ import (
 
 	"github.com/brittonhayes/vala/internal/auth"
 	"github.com/brittonhayes/vala/internal/auth/oauth"
+	"github.com/brittonhayes/vala/internal/brain"
 	"github.com/brittonhayes/vala/internal/config"
 	"github.com/brittonhayes/vala/internal/mcp"
 	"github.com/brittonhayes/vala/internal/tools"
@@ -24,6 +25,81 @@ type oauthExchangedMsg struct {
 // source and listing its tools.
 type evidenceValidatedMsg struct {
 	status mcp.EvidenceStatus
+}
+
+// notionCheckedMsg reports whether the Notion CLI is authenticated and, when it
+// is, the health of any configured brain: whether the parent database resolves
+// and which stores are missing or unreachable.
+type notionCheckedMsg struct {
+	authed     bool
+	databaseOK bool
+	missing    []string
+	err        error
+}
+
+// notionLoginDoneMsg signals `ntn login` (run with the TUI suspended) finished.
+type notionLoginDoneMsg struct{ err error }
+
+// notionProvisionedMsg carries the result of provisioning a fresh brain or
+// repairing an existing one. repaired lists the stores added during a repair
+// (empty for a fresh provision).
+type notionProvisionedMsg struct {
+	repaired []string
+	err      error
+}
+
+// checkNotionCmd verifies the Notion CLI is authenticated and, if so, probes the
+// configured brain (Verify) so the model can choose between provisioning fresh,
+// repairing in place, or doing nothing.
+func checkNotionCmd(ctx context.Context, cwd string, ids brain.DBIDs) tea.Cmd {
+	return func() tea.Msg {
+		store := &brain.NTN{Dir: cwd, DBs: ids}
+		if err := store.Whoami(ctx); err != nil {
+			return notionCheckedMsg{authed: false}
+		}
+		missing, databaseOK := store.Verify(ctx, ids)
+		return notionCheckedMsg{authed: true, databaseOK: databaseOK, missing: missing}
+	}
+}
+
+// notionLoginCmd suspends the TUI, runs `ntn login` (which opens the browser),
+// and resumes — the one interactive step vala cannot do for the operator.
+func notionLoginCmd() tea.Cmd {
+	return tea.ExecProcess(exec.Command("ntn", "login"), func(err error) tea.Msg {
+		return notionLoginDoneMsg{err: err}
+	})
+}
+
+// provisionNotionCmd creates the single brain database and its data sources, then
+// saves the resulting IDs to .vala.json.
+func provisionNotionCmd(ctx context.Context, cwd, parentPage string) tea.Cmd {
+	return func() tea.Msg {
+		store := &brain.NTN{Dir: cwd}
+		ids, err := store.Provision(ctx, parentPage)
+		if err != nil {
+			return notionProvisionedMsg{err: err}
+		}
+		if err := config.SaveNotion(cwd, ids); err != nil {
+			return notionProvisionedMsg{err: err}
+		}
+		return notionProvisionedMsg{}
+	}
+}
+
+// repairNotionCmd adds the missing data sources back under the existing brain
+// database and saves the patched IDs to .vala.json.
+func repairNotionCmd(ctx context.Context, cwd string, ids brain.DBIDs, missing []string) tea.Cmd {
+	return func() tea.Msg {
+		store := &brain.NTN{Dir: cwd, DBs: ids}
+		patched, err := store.AddMissing(ctx, ids, missing)
+		if err != nil {
+			return notionProvisionedMsg{err: err}
+		}
+		if err := config.SaveNotion(cwd, patched); err != nil {
+			return notionProvisionedMsg{err: err}
+		}
+		return notionProvisionedMsg{repaired: missing}
+	}
 }
 
 // authorizeOAuth mints the consent URL and PKCE verifier for the subscription

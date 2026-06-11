@@ -100,7 +100,7 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&flagPermission, "permission", "", "permission mode: ask | allow | deny")
 	rootCmd.PersistentFlags().BoolVar(&flagNoInitPrompt, "no-init-prompt", false, "suppress the first-run notice when no Notion brain is configured")
 	rootCmd.PersistentFlags().BoolVar(&flagRequireBrain, "require-brain", false, "fail instead of falling back to the ephemeral in-memory brain")
-	rootCmd.AddCommand(runCmd, versionCmd, initCmd)
+	rootCmd.AddCommand(runCmd, versionCmd)
 }
 
 // built bundles the constructed dependencies for a command.

@@ -43,4 +43,21 @@ func TestSetupCompleteRequiresAllThree(t *testing.T) {
 	if !setupComplete(cfg) {
 		t.Error("provider + brain + evidence should be complete")
 	}
+
+	// A Notion brain that is configured but missing a store is not "ready": setup
+	// must treat it as incomplete so it routes to repair rather than launching.
+	partial := config.Config{
+		Provider: "anthropic",
+		MCP:      []config.MCPServer{{Name: "scanner"}},
+		Notion:   fullNotion,
+	}
+	partial.Notion.Coverage = ""
+	if setupComplete(partial) {
+		t.Error("an incomplete Notion brain should make setup incomplete")
+	}
+	complete := partial
+	complete.Notion = fullNotion
+	if !setupComplete(complete) {
+		t.Error("a complete Notion brain should satisfy setup")
+	}
 }

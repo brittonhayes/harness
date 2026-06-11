@@ -165,8 +165,12 @@ type NTN struct {
 	schemas map[string]map[string]string // data-source ID -> (property name -> type)
 }
 
-// DBIDs holds the Notion database IDs the brain writes to.
+// DBIDs holds the Notion IDs the brain writes to. Database is the single parent
+// database that holds every store as a data source; the per-store fields are
+// those data sources' IDs (what the writers query and write against); Parent is
+// the page narrative hunt pages are created beneath.
 type DBIDs struct {
+	Database   string `json:"database"`
 	Evidence   string `json:"evidence"`
 	Hunts      string `json:"hunts"`
 	Intel      string `json:"intel"`

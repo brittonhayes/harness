@@ -21,10 +21,12 @@ func (m model) View() string {
 		body = m.viewOAuth()
 	case screenProviderKey, screenProviderLocal, screenEvidenceForm:
 		body = m.viewForm()
-	case screenProviderBusy, screenEvidenceBusy:
+	case screenProviderBusy, screenEvidenceBusy, screenBrainNotionBusy:
 		body = m.viewBusy()
-	case screenBrainNotion:
-		body = m.viewNotion()
+	case screenBrainNotionPage:
+		body = m.viewNotionPage()
+	case screenBrainNotionDone:
+		body = m.viewNotionResult()
 	case screenEvidenceResult:
 		body = m.viewEvidenceResult()
 	}
@@ -182,14 +184,33 @@ func (m model) viewBusy() string {
 	return m.header("Working") + "\n\n" + "  " + m.sp.View() + " " + m.styles.SpinnerLabel.Render(m.busyLabel)
 }
 
-func (m model) viewNotion() string {
+// viewNotionPage prompts for the Notion page the brain database is created
+// beneath, shown only when there is no existing database to repair.
+func (m model) viewNotionPage() string {
 	var b strings.Builder
 	b.WriteString(m.header("Notion brain") + "\n\n")
-	b.WriteString(m.styles.Assistant.Render("The shared Notion brain is provisioned with the Notion CLI:") + "\n\n")
-	b.WriteString("  " + m.styles.ToolCall.Render("ntn login") + m.styles.ToolMeta.Render("   # once, to authenticate") + "\n")
-	b.WriteString("  " + m.styles.ToolCall.Render("vala init") + m.styles.ToolMeta.Render("   # provisions the databases") + "\n\n")
-	b.WriteString(m.styles.Hint.Render("For now vala will run with no brain; set it up anytime.") + "\n\n")
-	b.WriteString(m.footerHint("enter continue"))
+	b.WriteString(m.styles.Assistant.Render("vala creates one \"Vala Brain\" database with a data source per store.") + "\n\n")
+	b.WriteString(m.styles.ToolMeta.Render(m.form.specs[0].label) + "\n")
+	b.WriteString("  " + m.form.inputs[0].View() + "\n\n")
+	b.WriteString(m.styles.Hint.Render("Share that page with your Notion integration first.") + "\n\n")
+	b.WriteString(m.footerHint("enter provision · esc skip"))
+	return b.String()
+}
+
+// viewNotionResult shows the outcome of provisioning or repairing the brain.
+func (m model) viewNotionResult() string {
+	var b strings.Builder
+	b.WriteString(m.header("Notion brain") + "\n\n")
+	if m.notionErr != nil {
+		wrap := lipgloss.NewStyle().Width(56)
+		b.WriteString(m.styles.Error.Render("✗ could not set up the Notion brain") + "\n")
+		b.WriteString(wrap.Foreground(lipgloss.Color("#FF8C8C")).Render(m.notionErr.Error()) + "\n\n")
+		b.WriteString(m.styles.Hint.Render("Run `ntn login` and confirm the page is shared, then retry.") + "\n\n")
+	} else {
+		b.WriteString(m.styles.Prompt.Render("✓ ") + m.styles.Assistant.Render(m.notionMsg) + "\n\n")
+		b.WriteString(m.styles.Hint.Render("Hunts, intel, and detections now persist to Notion.") + "\n\n")
+	}
+	b.WriteString(m.footerHint("enter back to setup"))
 	return b.String()
 }
 
