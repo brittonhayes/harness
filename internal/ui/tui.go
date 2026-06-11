@@ -80,7 +80,9 @@ type chatModel struct {
 	started    time.Time
 	cancel     context.CancelFunc
 
-	lastInputTokens int64 // most recent prompt token count, for auto-compaction
+	lastInputTokens   int64 // most recent prompt token count, for auto-compaction
+	compactedLen      int   // history length right after the last compaction (its seed)
+	warnedTightBudget bool  // true once we've warned that overhead alone fills the window
 
 	perm *permMsg // pending permission request, nil when none
 }
@@ -147,11 +149,17 @@ func (m chatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case toolCallMsg:
 		m.phase = phaseFor(msg.name, msg.summary)
 		m.repl.Session.Add(session.Entry{Kind: session.KindToolCall, Tool: msg.name, Content: msg.summary})
-		line := "  " + m.styles.ToolGlyph.Render("●") + " " + m.styles.ToolCall.Render(msg.name)
-		if s := oneLine(msg.summary, 96); s != "" {
-			line += "  " + m.styles.ToolMeta.Render(s)
+		// Routine tool activity stays grayscale and terse, like Claude Code: a dim
+		// bullet, a muted name, and a clean argument only when there is one worth
+		// showing. Raw JSON blobs are suppressed inline (they live in the
+		// transcript); only the agent's own text earns color.
+		line := "  " + m.styles.ToolMeta.Render("⏺") + " " + m.styles.Result.Render(msg.name)
+		if s := oneLine(msg.summary, 64); s != "" {
+			line += "  " + m.styles.Hint.Render(s)
 		}
-		m.append(line)
+		// Lead with a blank line so each tool group is set off from the surrounding
+		// text and from the prior group; the result line stays tucked beneath.
+		m.append("\n" + line)
 		return m, nil
 
 	case toolResultMsg:
@@ -310,7 +318,22 @@ func (m chatModel) onTurnDone(msg turnDoneMsg) (tea.Model, tea.Cmd) {
 	// Queued messages drain after the compaction completes, against the smaller
 	// history.
 	if m.shouldAutoCompact() {
+		m.warnedTightBudget = false
 		return m.startCompaction("", true)
+	}
+	// Over the budget but shouldAutoCompact declined: the load is fixed overhead
+	// (system prompt + connected tools), not summarizable conversation, so
+	// compacting again would only reproduce a similar seed — the must-compact
+	// loop. Warn once instead of looping silently; re-arm once we drop back under.
+	if m.overBudget() {
+		if !m.warnedTightBudget {
+			m.warnedTightBudget = true
+			m.append("  " + m.styles.Denied.Render("⚠ near the context window limit, but the load is mostly fixed overhead "+
+				"(system prompt + connected tools) rather than conversation — compaction can't reclaim it. "+
+				"Switch to a larger-window model with /connect or disable unused MCP tools."))
+		}
+	} else {
+		m.warnedTightBudget = false
 	}
 	if len(m.queue) > 0 {
 		next := m.queue[0]
@@ -360,10 +383,17 @@ func (m chatModel) onCompactDone(msg compactDoneMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	}
+	priorMsgs := len(m.history)
+	priorTokens := m.lastInputTokens
 	m.history = msg.history
-	m.lastInputTokens = 0 // next turn re-measures the smaller prompt
+	m.compactedLen = len(msg.history) // baseline so we don't re-compact the bare seed
+	m.lastInputTokens = 0             // next turn re-measures the smaller prompt
+	m.warnedTightBudget = false
+	// The recap is context for the model, not the operator: seed it into the new
+	// history (already done via msg.history) and keep the full text in the session
+	// log for the record, but show only a one-line confirmation in the transcript.
 	m.repl.Session.Add(session.Entry{Kind: session.KindAssistant, Content: "[context compacted]\n\n" + msg.summary})
-	m.append("\n" + m.md.render("**Context compacted.**\n\n"+msg.summary))
+	m.append("  " + m.styles.Hint.Render(compactNotice(priorMsgs, priorTokens)))
 	if len(m.queue) > 0 {
 		next := m.queue[0]
 		m.queue = m.queue[1:]
@@ -373,17 +403,61 @@ func (m chatModel) onCompactDone(msg compactDoneMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// shouldAutoCompact reports whether the latest prompt size has crossed the
-// configured fraction of the context window. Disabled when either threshold is
-// non-positive or when there is no history to compact.
+// minCompactGain is how many messages must accumulate beyond the last
+// compaction's seed before another auto-compaction is worthwhile. Re-summarizing
+// a history that has barely grown only reproduces a similar-size seed — the
+// must-compact loop the operator hits when fixed overhead dominates the window.
+const minCompactGain = 2
+
+// shouldAutoCompact reports whether the latest prompt has crossed the configured
+// fraction of the context window AND enough conversation has accrued since the
+// last compaction to make summarizing it worthwhile. Disabled when either
+// threshold is non-positive or when there is no history to compact.
 func (m chatModel) shouldAutoCompact() bool {
-	win := m.repl.ContextWindow
-	frac := m.repl.AutoCompactThreshold
-	if win <= 0 || frac <= 0 || len(m.history) == 0 {
+	if !m.overBudget() || len(m.history) == 0 {
 		return false
 	}
-	limit := int64(float64(win) * frac)
-	return m.lastInputTokens >= limit
+	// Nothing meaningful has accumulated since the last compaction (or session
+	// start): compacting again cannot shrink the prompt, so don't.
+	return len(m.history) > m.compactedLen+minCompactGain
+}
+
+// overBudget reports whether the latest prompt size has crossed the configured
+// fraction of the context window, regardless of whether compaction can help.
+func (m chatModel) overBudget() bool {
+	win := m.repl.ContextWindow
+	frac := m.repl.AutoCompactThreshold
+	if win <= 0 || frac <= 0 {
+		return false
+	}
+	return m.lastInputTokens >= int64(float64(win)*frac)
+}
+
+// compactNotice is the one-line transcript confirmation shown after compaction.
+// The full recap stays hidden — it is fed to the model, not pasted for the
+// operator to scroll past.
+func compactNotice(msgs int, tokens int64) string {
+	s := "● context compacted — prior conversation summarized"
+	if msgs > 0 {
+		s += fmt.Sprintf(" (%d messages", msgs)
+		if tokens > 0 {
+			s += fmt.Sprintf(", ~%s tokens", humanCount(tokens))
+		}
+		s += " folded into a recap)"
+	}
+	return s
+}
+
+// humanCount renders a token count compactly: 1500 -> "2k", 1_200_000 -> "1.2M".
+func humanCount(n int64) string {
+	switch {
+	case n >= 1_000_000:
+		return fmt.Sprintf("%.1fM", float64(n)/1_000_000)
+	case n >= 1_000:
+		return fmt.Sprintf("%.0fk", float64(n)/1_000)
+	default:
+		return fmt.Sprintf("%d", n)
+	}
 }
 
 // interrupt cancels the in-flight turn and resolves any pending permission
@@ -462,12 +536,10 @@ func (m chatModel) footer() string {
 	if m.perm != nil {
 		return "  " + m.styles.PermissionKey.Render("[y]es  ·  [n]o  ·  [a]lways allow this tool")
 	}
-	hint := "enter send · ctrl+j newline · ↑/pgup scroll · ctrl+c quit"
-	if m.running {
-		hint = "type to queue · enter send · esc interrupt · ctrl+c quit"
-	}
-	mode := m.styles.Mode.Render("shift+tab perms: " + m.modeLabel())
-	return "  " + m.styles.Hint.Render(hint) + "  " + mode
+	// Only the non-obvious control survives: the permission mode and how to cycle
+	// it. Send/newline/scroll/quit are universal terminal conventions — showing
+	// them is noise.
+	return "  " + m.styles.Mode.Render("⏵⏵ "+m.modeLabel()) + "  " + m.styles.Hint.Render("shift+tab to cycle")
 }
 
 // modeLabel renders the gate's current permission disposition for the footer.
@@ -485,15 +557,10 @@ func (m chatModel) modeLabel() string {
 // banner is the curated session header, rendered as the first transcript block.
 func (m chatModel) banner() string {
 	var b strings.Builder
-	b.WriteString("  " + m.styles.BannerTag.Render("vala") + "  " +
-		m.styles.Hint.Render("security detection & response · "+m.repl.Model))
-	if p := m.repl.Session.Path(); p != "" {
-		b.WriteString("\n  " + m.styles.Hint.Render("transcript · "+p))
-	}
+	b.WriteString("  " + m.styles.BannerTag.Render("vala") + "  " + m.styles.Hint.Render(m.repl.Model))
 	if line := m.evidenceLine(); line != "" {
 		b.WriteString("\n  " + line)
 	}
-	b.WriteString("\n  " + m.styles.Hint.Render(`type a request · /help for commands · "exit" to quit`))
 	b.WriteString("\n  " + m.styles.Rule.Render(strings.Repeat("─", 52)))
 	return b.String()
 }
@@ -521,20 +588,30 @@ func (m chatModel) evidenceLine() string {
 	return m.styles.Hint.Render("evidence · ") + strings.Join(parts, m.styles.Hint.Render(" · "))
 }
 
-// renderResult formats a tool result as a dim, gutter-framed block.
+// renderResult collapses a tool result to a single dim line — a snippet of the
+// output, the way Claude Code previews an MCP response — with a "(+N lines)"
+// marker when there is more. The full content is preserved in the session
+// transcript on disk, so nothing is lost; the live view just stays uncluttered.
+// Errors keep their first line in the error tone so failures are never silently
+// swallowed.
 func (m chatModel) renderResult(content string, isErr bool) string {
-	style := m.styles.Result
-	gutter := m.styles.Gutter.Render("  │ ")
+	trimmed := strings.TrimRight(content, "\n")
 	if isErr {
-		style = m.styles.ResultErr
-		gutter = m.styles.Error.Render("  │ ")
+		return m.styles.Error.Render("  ⎿ ") + m.styles.ResultErr.Render(oneLine(trimmed, 80))
 	}
-	lines := previewLines(content, 6)
-	out := make([]string, 0, len(lines))
-	for _, ln := range lines {
-		out = append(out, gutter+style.Render(ln))
+	connector := m.styles.ToolMeta.Render("  ⎿ ")
+	if trimmed == "" {
+		return connector + m.styles.Hint.Render("done")
 	}
-	return strings.Join(out, "\n")
+	first := trimmed
+	if i := strings.IndexByte(trimmed, '\n'); i >= 0 {
+		first = trimmed[:i]
+	}
+	out := connector + m.styles.Hint.Render(oneLine(first, 64))
+	if extra := strings.Count(trimmed, "\n"); extra > 0 {
+		out += m.styles.ToolMeta.Render(fmt.Sprintf("  (+%d lines)", extra))
+	}
+	return out
 }
 
 // append adds a rendered block to the transcript and scrolls to it.

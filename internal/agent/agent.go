@@ -7,6 +7,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/brittonhayes/vala/internal/llm"
@@ -204,5 +206,54 @@ func summarize(name string, input json.RawMessage) string {
 	case "recall":
 		return get("query")
 	}
+	// Fallback (MCP and other tools we don't special-case): render the input
+	// object as a compact, readable "key: value" list rather than raw JSON, so
+	// the UI can show a glance of the query. Keys are sorted for stability.
+	if len(m) > 0 {
+		return compactArgs(m)
+	}
 	return strings.TrimSpace(string(input))
+}
+
+// compactArgs flattens a decoded JSON object into "k: v · k: v" with sorted
+// keys. It is intentionally shallow — nested objects collapse to "{…}" — so the
+// result stays a short, scannable summary.
+func compactArgs(m map[string]any) string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	parts := make([]string, 0, len(keys))
+	for _, k := range keys {
+		parts = append(parts, k+": "+compactVal(m[k]))
+	}
+	return strings.Join(parts, " · ")
+}
+
+// compactVal renders a single decoded JSON value compactly: arrays join with
+// commas, nested objects collapse, and integer-valued floats lose the ".0".
+func compactVal(v any) string {
+	switch t := v.(type) {
+	case string:
+		return t
+	case bool:
+		return strconv.FormatBool(t)
+	case nil:
+		return "null"
+	case float64:
+		if t == float64(int64(t)) {
+			return strconv.FormatInt(int64(t), 10)
+		}
+		return strconv.FormatFloat(t, 'g', -1, 64)
+	case []any:
+		els := make([]string, 0, len(t))
+		for _, e := range t {
+			els = append(els, compactVal(e))
+		}
+		return strings.Join(els, ",")
+	case map[string]any:
+		return "{…}"
+	}
+	return fmt.Sprint(v)
 }

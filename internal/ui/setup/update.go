@@ -112,7 +112,7 @@ func (m model) toHub() (tea.Model, tea.Cmd) {
 
 func (m model) providerStatus() string {
 	if m.providerDone {
-		return "connected · " + m.opts.Model
+		return m.opts.Model
 	}
 	return "not connected"
 }

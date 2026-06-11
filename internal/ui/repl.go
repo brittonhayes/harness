@@ -130,39 +130,3 @@ func oneLine(s string, n int) string {
 	}
 	return s
 }
-
-// previewLines returns the first max lines of a tool result, trimmed, with an
-// elision marker when the content is longer.
-func previewLines(s string, max int) []string {
-	s = strings.TrimRight(s, "\n")
-	if s == "" {
-		return nil
-	}
-	lines := strings.Split(s, "\n")
-	if len(lines) <= max {
-		return lines
-	}
-	out := append([]string{}, lines[:max]...)
-	return append(out, fmtMore(len(lines)-max))
-}
-
-func fmtMore(n int) string {
-	if n == 1 {
-		return "… (1 more line)"
-	}
-	return "… (" + itoa(n) + " more lines)"
-}
-
-func itoa(n int) string {
-	if n == 0 {
-		return "0"
-	}
-	var b [20]byte
-	i := len(b)
-	for n > 0 {
-		i--
-		b[i] = byte('0' + n%10)
-		n /= 10
-	}
-	return string(b[i:])
-}

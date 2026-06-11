@@ -127,21 +127,27 @@ func TestClearBusyIsNoOp(t *testing.T) {
 }
 
 func TestShouldAutoCompact(t *testing.T) {
-	hist := []llm.Message{llm.UserText("hi")}
+	// A history long enough to clear the minCompactGain guard.
+	hist := []llm.Message{llm.UserText("a"), llm.UserText("b"), llm.UserText("c"), llm.UserText("d")}
 	tests := []struct {
-		name      string
-		window    int64
-		threshold float64
-		tokens    int64
-		history   []llm.Message
-		want      bool
+		name        string
+		window      int64
+		threshold   float64
+		tokens      int64
+		history     []llm.Message
+		compactedAt int
+		want        bool
 	}{
-		{"below threshold", 1000, 0.8, 700, hist, false},
-		{"at threshold", 1000, 0.8, 800, hist, true},
-		{"above threshold", 1000, 0.8, 900, hist, true},
-		{"disabled window", 0, 0.8, 900, hist, false},
-		{"disabled threshold", 1000, 0, 900, hist, false},
-		{"empty history", 1000, 0.8, 900, nil, false},
+		{"below threshold", 1000, 0.8, 700, hist, 0, false},
+		{"at threshold", 1000, 0.8, 800, hist, 0, true},
+		{"above threshold", 1000, 0.8, 900, hist, 0, true},
+		{"disabled window", 0, 0.8, 900, hist, 0, false},
+		{"disabled threshold", 1000, 0, 900, hist, 0, false},
+		{"empty history", 1000, 0.8, 900, nil, 0, false},
+		// Over budget but the history is still just the post-compaction seed plus
+		// a turn or two: compaction can't help, so it must not fire (the loop guard).
+		{"just compacted, no growth", 1000, 0.8, 900, hist, 4, false},
+		{"just compacted, some growth", 1000, 0.8, 900, hist, 1, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -150,6 +156,7 @@ func TestShouldAutoCompact(t *testing.T) {
 			m.repl.AutoCompactThreshold = tt.threshold
 			m.lastInputTokens = tt.tokens
 			m.history = tt.history
+			m.compactedLen = tt.compactedAt
 			if got := m.shouldAutoCompact(); got != tt.want {
 				t.Errorf("shouldAutoCompact() = %v, want %v", got, tt.want)
 			}

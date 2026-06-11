@@ -31,13 +31,21 @@ func (m model) View() string {
 	return m.frame(body)
 }
 
+// Card geometry. cardInner is the usable text width inside the border and
+// padding (cardWidth − 2·cardPadX); rows truncate to it so nothing wraps.
+const (
+	cardWidth = 64
+	cardPadX  = 2
+	cardInner = cardWidth - 2*cardPadX
+)
+
 // frame wraps a screen body in the bordered, centered card and footer hint.
 func (m model) frame(body string) string {
 	card := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color("#7D56F4")).
-		Padding(1, 3).
-		Width(64).
+		Padding(1, cardPadX).
+		Width(cardWidth).
 		Render(body)
 
 	if m.width == 0 || m.height == 0 {
@@ -82,14 +90,23 @@ func (m model) viewHub() string {
 		} else if done {
 			glyph = m.styles.Prompt.Render("✓")
 		}
-		b.WriteString(cursor + glyph + " " + label)
-		if c.desc != "" {
-			b.WriteString("  " + m.styles.ToolMeta.Render(c.desc))
-		}
-		b.WriteString("\n")
+		b.WriteString(m.choiceRow(cursor+glyph+" ", label, c.desc) + "\n")
 	}
 	b.WriteString("\n" + m.footerHint("↑/↓ move · enter select · esc start"))
 	return b.String()
+}
+
+// choiceRow renders "<prefix><label>  <desc>", truncating the description so the
+// line never exceeds the card width and wraps mid-word. prefix and label are
+// already styled; desc is dimmed here.
+func (m model) choiceRow(prefix, label, desc string) string {
+	row := prefix + label
+	if desc != "" {
+		if avail := cardInner - lipgloss.Width(row) - 2; avail > 1 {
+			row += "  " + m.styles.ToolMeta.Render(oneLine(desc, avail))
+		}
+	}
+	return row
 }
 
 // rowDone reports whether a hub step is satisfied, for its status glyph.
@@ -115,11 +132,7 @@ func (m model) viewSelector() string {
 			cursor = m.styles.Prompt.Render("› ")
 			label = m.styles.ToolCall.Render(c.label)
 		}
-		b.WriteString(cursor + label)
-		if c.desc != "" {
-			b.WriteString("  " + m.styles.ToolMeta.Render(c.desc))
-		}
-		b.WriteString("\n")
+		b.WriteString(m.choiceRow(cursor, label, c.desc) + "\n")
 	}
 	b.WriteString("\n" + m.footerHint("↑/↓ move · enter select · esc skip step"))
 	return b.String()
