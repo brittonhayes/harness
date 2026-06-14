@@ -9,6 +9,7 @@ import (
 
 	"github.com/brittonhayes/vala/internal/llm"
 	"github.com/brittonhayes/vala/internal/session"
+	"github.com/brittonhayes/vala/internal/tool"
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textarea"
@@ -29,8 +30,8 @@ const maxInputLines = 10
 type assistantMsg string
 type toolCallMsg struct{ name, summary string }
 type toolResultMsg struct {
-	name, content string
-	isErr         bool
+	name   string
+	result tool.Result
 }
 type deniedMsg struct{ name string }
 type turnDoneMsg struct {
@@ -175,8 +176,8 @@ func (m chatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case toolResultMsg:
 		m.phase = phaseThinking
-		m.repl.Session.Add(session.Entry{Kind: session.KindToolResult, Tool: msg.name, Content: msg.content, IsError: msg.isErr})
-		m.append(m.renderResult(msg.content, msg.isErr))
+		m.repl.Session.Add(session.Entry{Kind: session.KindToolResult, Tool: msg.name, Content: msg.result.Content, IsError: msg.result.IsError})
+		m.append(m.renderResult(msg.result))
 		return m, nil
 
 	case deniedMsg:
@@ -607,7 +608,7 @@ func (m chatModel) View() string {
 	}
 	parts = append(parts,
 		m.statusLine(),
-		box.Width(m.width-2).Render(m.ta.View()),
+		box.Width(max(1, m.width-2)).Render(m.ta.View()),
 		m.footer(),
 	)
 	return lipgloss.JoinVertical(lipgloss.Left, parts...)
@@ -762,13 +763,19 @@ func (m chatModel) evidenceLine() string {
 	return m.styles.Hint.Render("evidence · ") + strings.Join(parts, m.styles.Hint.Render(" · "))
 }
 
-// renderResult collapses a tool result to a single dim line — a snippet of the
-// output, the way Claude Code previews an MCP response — with a "(+N lines)"
+// renderResult shows rich operator-facing metadata when a tool returns a card,
+// otherwise it falls back to a compact one-line snippet with a "(+N lines)"
 // marker when there is more. The full content is preserved in the session
-// transcript on disk, so nothing is lost; the live view just stays uncluttered.
-// Errors keep their first line in the error tone so failures are never silently
-// swallowed.
-func (m chatModel) renderResult(content string, isErr bool) string {
+// transcript on disk, so nothing is lost. Errors always keep the compact error
+// style so failures are never mistaken for successful state changes.
+func (m chatModel) renderResult(result tool.Result) string {
+	if !result.IsError && result.Card != nil {
+		return m.renderCard(*result.Card)
+	}
+	return m.renderResultLine(result.Content, result.IsError)
+}
+
+func (m chatModel) renderResultLine(content string, isErr bool) string {
 	trimmed := strings.TrimRight(content, "\n")
 	if isErr {
 		return m.styles.Error.Render("  ⎿ ") + m.styles.ResultErr.Render(oneLine(trimmed, 80))
@@ -788,6 +795,83 @@ func (m chatModel) renderResult(content string, isErr bool) string {
 	return out
 }
 
+func (m chatModel) renderCard(card tool.Card) string {
+	var lines []string
+	title := strings.TrimSpace(card.Title)
+	if title == "" {
+		title = "Tool result"
+	}
+	head := m.styles.ToolMeta.Render("  ⎿ ") + m.styles.CardTitle.Render(title)
+	if summary := strings.TrimSpace(card.Summary); summary != "" {
+		head += m.styles.ToolMeta.Render(" · ") + m.styles.CardSummary.Render(oneLine(summary, 72))
+	}
+	lines = append(lines, head)
+	bodyWidth := max(24, min(88, m.width-7))
+	prefix := "     "
+	if len(card.Changes) > 0 {
+		for _, change := range card.Changes {
+			if line := m.renderCardChange(change, bodyWidth); line != "" {
+				lines = append(lines, prefix+line)
+			}
+		}
+	}
+	if len(card.Fields) > 0 {
+		for _, field := range firstFields(card.Fields, 3) {
+			if line := m.renderCardField(field, bodyWidth); line != "" {
+				lines = append(lines, prefix+line)
+			}
+		}
+	}
+	if card.Link != "" {
+		if line := m.renderCardField(tool.Field{Label: "link", Value: card.Link}, bodyWidth); line != "" {
+			lines = append(lines, prefix+line)
+		}
+	}
+	if len(card.Suggestions) > 0 {
+		lines = append(lines, prefix+m.renderSuggestion(card.Suggestions[0], bodyWidth))
+	}
+	return strings.Join(lines, "\n")
+}
+
+func (m chatModel) renderCardField(field tool.Field, bodyWidth int) string {
+	label := strings.TrimSpace(field.Label)
+	value := strings.TrimSpace(field.Value)
+	if label == "" || value == "" {
+		return ""
+	}
+	text := label + ": " + value
+	return m.styles.CardLabel.Render(oneLine(text, bodyWidth))
+}
+
+func (m chatModel) renderCardChange(change tool.Change, bodyWidth int) string {
+	label := strings.TrimSpace(change.Label)
+	after := strings.TrimSpace(change.After)
+	before := strings.TrimSpace(change.Before)
+	if label == "" || after == "" {
+		return ""
+	}
+	text := label + " added: " + after
+	if before != "" {
+		text = label + " updated: " + before + " -> " + after
+	}
+	return m.styles.CardChange.Render(oneLine(text, bodyWidth))
+}
+
+func (m chatModel) renderSuggestion(s tool.Suggestion, bodyWidth int) string {
+	title := strings.TrimSpace(s.Title)
+	if title == "" {
+		title = "Follow-up hunt"
+	}
+	return m.styles.CardSuggest.Render(oneLine("queue next: "+title, bodyWidth))
+}
+
+func firstFields(fields []tool.Field, n int) []tool.Field {
+	if len(fields) <= n {
+		return fields
+	}
+	return fields[:n]
+}
+
 // append adds a rendered block to the transcript and scrolls to it.
 func (m *chatModel) append(block string) {
 	m.blocks = append(m.blocks, block)
@@ -798,6 +882,9 @@ func (m *chatModel) refreshViewport() {
 	if !m.ready {
 		return
 	}
+	if len(m.blocks) > 0 {
+		m.blocks[0] = m.banner()
+	}
 	m.vp.SetContent(strings.Join(m.blocks, "\n"))
 	m.vp.GotoBottom()
 }
@@ -806,7 +893,7 @@ func (m *chatModel) refreshViewport() {
 func (m chatModel) resize(w, h int) (tea.Model, tea.Cmd) {
 	m.width, m.height = w, h
 	m.md = newMarkdownRenderer(w - 4)
-	m.ta.SetWidth(w - 4)
+	m.ta.SetWidth(max(1, w-4))
 	if !m.ready {
 		m.vp = viewport.New(w, m.viewportHeight())
 		m.ready = true

@@ -24,6 +24,11 @@ type Styles struct {
 	InputBoxBusy lipgloss.Style
 	Queued       lipgloss.Style
 	User         lipgloss.Style
+	CardTitle    lipgloss.Style
+	CardSummary  lipgloss.Style
+	CardLabel    lipgloss.Style
+	CardChange   lipgloss.Style
+	CardSuggest  lipgloss.Style
 
 	// Permission styles are deliberately high-contrast so an approval request is
 	// impossible to miss against the dim transcript.
@@ -60,6 +65,11 @@ func DefaultStyles() Styles {
 		InputBoxBusy: lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("#7D56F4")).Padding(0, 1),
 		Queued:       lipgloss.NewStyle().Foreground(lipgloss.Color("#FFB454")),
 		User:         lipgloss.NewStyle().Foreground(lipgloss.Color("#E6E6E6")),
+		CardTitle:    lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FFFFFF")),
+		CardSummary:  lipgloss.NewStyle().Foreground(lipgloss.Color("#B9B0E6")),
+		CardLabel:    lipgloss.NewStyle().Foreground(lipgloss.Color("#7A7A7A")),
+		CardChange:   lipgloss.NewStyle().Foreground(lipgloss.Color("#43BF6D")),
+		CardSuggest:  lipgloss.NewStyle().Foreground(lipgloss.Color("#FFB454")),
 
 		Permission:    lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FFFFFF")),
 		PermissionKey: lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#B197FC")),

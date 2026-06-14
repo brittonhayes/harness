@@ -26,7 +26,7 @@ type Events struct {
 	// OnToolCall fires before a tool runs, with a one-line summary.
 	OnToolCall func(name, summary string)
 	// OnToolResult fires after a tool runs.
-	OnToolResult func(name, content string, isError bool)
+	OnToolResult func(name string, result tool.Result)
 	// OnPermissionDenied fires when the gate blocks a call.
 	OnPermissionDenied func(name, summary string)
 	// OnUsage fires after each model response with the token counts for that
@@ -45,9 +45,9 @@ func (e Events) toolCall(name, summary string) {
 		e.OnToolCall(name, summary)
 	}
 }
-func (e Events) toolResult(name, content string, isErr bool) {
+func (e Events) toolResult(name string, result tool.Result) {
 	if e.OnToolResult != nil {
-		e.OnToolResult(name, content, isErr)
+		e.OnToolResult(name, result)
 	}
 }
 func (e Events) denied(name, summary string) {
@@ -241,7 +241,7 @@ func (a *Agent) runToolUse(ctx context.Context, block llm.Block, decide decideFu
 	t, ok := a.registry.Get(block.Name)
 	if !ok {
 		msg := "unknown tool: " + block.Name
-		ev.toolResult(block.Name, msg, true)
+		ev.toolResult(block.Name, tool.Errorf("%s", msg))
 		return llm.ToolResultBlock(block.ID, msg, true)
 	}
 
@@ -249,7 +249,7 @@ func (a *Agent) runToolUse(ctx context.Context, block llm.Block, decide decideFu
 	// must not run even if the model names it directly.
 	if a.activeTool != nil && !a.activeTool(t) {
 		msg := "tool not available in " + a.mode.ID + " mode: " + block.Name
-		ev.toolResult(block.Name, msg, true)
+		ev.toolResult(block.Name, tool.Errorf("%s", msg))
 		return llm.ToolResultBlock(block.ID, msg, true)
 	}
 
@@ -262,10 +262,10 @@ func (a *Agent) runToolUse(ctx context.Context, block llm.Block, decide decideFu
 	res, err := t.Run(ctx, block.Input)
 	if err != nil {
 		msg := "tool error: " + err.Error()
-		ev.toolResult(block.Name, msg, true)
+		ev.toolResult(block.Name, tool.Errorf("%s", msg))
 		return llm.ToolResultBlock(block.ID, msg, true)
 	}
-	ev.toolResult(block.Name, res.Content, res.IsError)
+	ev.toolResult(block.Name, res)
 	return llm.ToolResultBlock(block.ID, res.Content, res.IsError)
 }
 

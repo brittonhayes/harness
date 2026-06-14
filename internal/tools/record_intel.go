@@ -49,8 +49,9 @@ func (t *RecordIntel) Run(ctx context.Context, input json.RawMessage) (tool.Resu
 		Kind: in.Kind, Value: in.Value, MITRE: in.MITRE,
 		Confidence: in.Confidence, Source: in.Source, Description: in.Description,
 	}
-	if t.RC.HuntID != "" {
-		intel.Hunts = []string{t.RC.HuntID}
+	snap := t.RC.Snapshot()
+	if snap.HuntID != "" {
+		intel.Hunts = []string{snap.HuntID}
 	}
 	id, err := t.RC.Brain.RecordIntel(ctx, intel)
 	if err != nil {

@@ -22,6 +22,7 @@ type fakeTool struct {
 	name     string
 	readOnly bool
 	ran      *bool
+	result   tool.Result
 }
 
 func (f fakeTool) Name() string        { return f.name }
@@ -31,6 +32,9 @@ func (f fakeTool) ReadOnly() bool      { return f.readOnly }
 func (f fakeTool) Run(context.Context, json.RawMessage) (tool.Result, error) {
 	if f.ran != nil {
 		*f.ran = true
+	}
+	if f.result.Content != "" || f.result.IsError || f.result.Card != nil {
+		return f.result, nil
 	}
 	return tool.Text("ran " + f.name), nil
 }
@@ -140,5 +144,37 @@ func TestRunToolUseRefusesFilteredTool(t *testing.T) {
 	}
 	if ran {
 		t.Error("a filtered-out tool must not run")
+	}
+}
+
+func TestRunToolUseEmitsFullResultButKeepsModelContent(t *testing.T) {
+	r := tool.NewRegistry()
+	cardResult := tool.Result{
+		Content: "model-facing content",
+		Card: &tool.Card{
+			Title:  "Finding recorded",
+			Fields: []tool.Field{{Label: "evidence ID", Value: "ev-1"}},
+		},
+	}
+	r.Register(fakeTool{name: "record_finding", result: cardResult})
+	a := New(nil, r, permission.New(permission.ModeAllow, nil), "/w", 10, 1, "",
+		Session{Mode: mode.Default(), Skills: skills.NewSet(), EvidenceNames: nil})
+
+	var observed tool.Result
+	block := llm.ToolUseBlock("id-1", "record_finding", json.RawMessage(`{}`))
+	res := a.runToolUse(context.Background(), block, allowAll, Events{
+		OnToolResult: func(name string, result tool.Result) {
+			if name != "record_finding" {
+				t.Fatalf("tool name = %q", name)
+			}
+			observed = result
+		},
+	})
+
+	if res.Content != "model-facing content" || res.IsError {
+		t.Fatalf("model result = %#v", res)
+	}
+	if observed.Card == nil || observed.Card.Title != "Finding recorded" {
+		t.Fatalf("event did not receive card: %#v", observed)
 	}
 }

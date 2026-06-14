@@ -1,10 +1,12 @@
 package ui
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/brittonhayes/vala/internal/permission"
 	"github.com/brittonhayes/vala/internal/session"
+	"github.com/brittonhayes/vala/internal/tool"
 )
 
 // newTestModel builds a chatModel wired to a real session and gate but no agent,
@@ -103,5 +105,67 @@ func TestInterruptResolvesPendingPermission(t *testing.T) {
 	}
 	if m.perm != nil {
 		t.Fatal("expected perm cleared after interrupt")
+	}
+}
+
+func TestRenderResultUsesRichCard(t *testing.T) {
+	m := newTestModel(t)
+
+	out := m.renderResult(tool.Result{Content: "model-facing text", Card: &tool.Card{
+		Title:   "Finding recorded",
+		Summary: "A cited evidence row was added.",
+		Fields: []tool.Field{
+			{Label: "claim", Value: "Okta impossible travel candidate observed"},
+			{Label: "evidence ID", Value: "evidence_123"},
+		},
+		Changes: []tool.Change{{Label: "finding", After: "Okta impossible travel candidate observed"}},
+		Suggestions: []tool.Suggestion{{
+			Title:      "Close the visibility gap",
+			Trigger:    "Visibility gap",
+			Hypothesis: "Telemetry can be restored.",
+			DataSource: "cloudtrail",
+			Priority:   "high",
+		}},
+	}})
+
+	for _, want := range []string{"Finding recorded", "finding added", "claim", "evidence_123", "queue next"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("rich card missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "model-facing text") {
+		t.Fatalf("rich card should not render raw model content:\n%s", out)
+	}
+}
+
+func TestRenderResultFallbackAndError(t *testing.T) {
+	m := newTestModel(t)
+
+	fallback := m.renderResult(tool.Text("first line\nsecond line"))
+	if !strings.Contains(fallback, "first line") || !strings.Contains(fallback, "+1 lines") {
+		t.Fatalf("fallback missing compact output:\n%s", fallback)
+	}
+
+	errOut := m.renderResult(tool.Result{
+		Content: "failed loudly",
+		IsError: true,
+		Card:    &tool.Card{Title: "Should not render"},
+	})
+	if !strings.Contains(errOut, "failed loudly") || strings.Contains(errOut, "Should not render") {
+		t.Fatalf("error should keep compact error styling and ignore cards:\n%s", errOut)
+	}
+}
+
+func TestWideViewStaysFullWidthWithoutRail(t *testing.T) {
+	m := newTestModel(t)
+	res, _ := m.resize(120, 24)
+	m = res.(chatModel)
+	view := m.View()
+
+	if strings.Contains(view, "Active Hunt") || strings.Contains(view, "detection workspace") {
+		t.Fatalf("view rendered removed rail:\n%s", view)
+	}
+	if m.vp.Width != 120 {
+		t.Fatalf("wide viewport width = %d, want full terminal width 120", m.vp.Width)
 	}
 }

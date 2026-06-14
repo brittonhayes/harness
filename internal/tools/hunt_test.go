@@ -37,6 +37,7 @@ func TestQueueHuntTool(t *testing.T) {
 	if res.IsError {
 		t.Fatalf("queue_hunt failed: %s", res.Content)
 	}
+	assertCard(t, res, "Backlog item queued", "backlog", "queued", "cloudtrail")
 	rows := mem.RowsIn(brain.DBBacklog)
 	if len(rows) != 1 {
 		t.Fatalf("expected 1 backlog row, got %d", len(rows))
@@ -82,6 +83,7 @@ func TestRecordFindingTool(t *testing.T) {
 	if !strings.Contains(res.Content, "recorded finding") {
 		t.Fatalf("expected a finding id in output: %q", res.Content)
 	}
+	assertCard(t, res, "Finding recorded", "finding", "DeleteDetector observed", "q-1")
 	ev := mem.RowsIn(brain.DBEvidence)
 	if len(ev) != 1 || ev[0].Props["hunt"] != huntID {
 		t.Fatalf("finding not linked to hunt: %+v", ev)
@@ -136,6 +138,7 @@ func TestValidateDataRecordsPlan(t *testing.T) {
 	if !rc.DataPlanValidated() {
 		t.Fatal("expected data plan to be marked validated")
 	}
+	assertCard(t, res, "Telemetry validated", "data plan", "cloudtrail", "90d")
 	ev := mem.RowsIn(brain.DBEvidence)
 	if len(ev) != 1 || ev[0].Props["kind"] != brain.EvidenceDataPlan || ev[0].Props["hunt"] != huntID {
 		t.Fatalf("expected one data_plan evidence row linked to hunt, got %v", ev)
@@ -153,6 +156,7 @@ func TestValidateDataRecordsGapOnFailure(t *testing.T) {
 	if rc.DataPlanValidated() {
 		t.Fatal("a failed check must not mark the data plan validated")
 	}
+	assertCard(t, res, "Visibility gap recorded", "visibility gap", "no flow logs retained", "Consider queueing next")
 	if gaps := rc.Gaps(); len(gaps) != 1 || gaps[0].Source != brain.EvidenceGap {
 		t.Fatalf("expected one recorded visibility gap, got %v", gaps)
 	}
@@ -220,6 +224,7 @@ func TestStoreHuntHappyPath(t *testing.T) {
 	if res.IsError {
 		t.Fatalf("store_hunt happy path failed: %s", res.Content)
 	}
+	assertCard(t, res, "Hunt closed", "hunt", "closed as Confirmed", "tier1_automated", "watch for variant behavior")
 	if got := mem.Rows[huntID].Props["status"]; got != brain.HuntConfirmed {
 		t.Fatalf("hunt status = %v, want %q", got, brain.HuntConfirmed)
 	}
@@ -229,6 +234,31 @@ func TestStoreHuntHappyPath(t *testing.T) {
 	if outcome, _ := rc.HuntOutcome(); outcome != brain.HuntConfirmed {
 		t.Fatalf("run context outcome = %q, want %q", outcome, brain.HuntConfirmed)
 	}
+}
+
+func TestStoreHuntSuggestsForInconclusiveAndTierThree(t *testing.T) {
+	rc, _, _ := newHuntRC(t)
+	if res := run(t, &ValidateData{RC: rc}, map[string]any{
+		"sources": []string{"cloudtrail"}, "validated": true,
+	}); res.IsError {
+		t.Fatalf("validate_data failed: %s", res.Content)
+	}
+	fres := run(t, &RecordFinding{RC: rc}, map[string]any{
+		"claim": "fact", "source": "query", "pointer": "q-1",
+	})
+	fid := strings.TrimSpace(strings.TrimPrefix(strings.SplitN(fres.Content, "—", 2)[0], "recorded finding "))
+
+	res := run(t, &StoreHunt{RC: rc}, map[string]any{
+		"outcome":        brain.HuntInconclusive,
+		"detection_tier": brain.TierRecurring,
+		"tier_rationale": "needs more lookback",
+		"findings":       []map[string]any{{"text": "fact remains ambiguous", "evidence": []string{fid}}},
+		"next_steps":     []string{"rerun with 180d of data"},
+	})
+	if res.IsError {
+		t.Fatalf("store_hunt failed: %s", res.Content)
+	}
+	assertCard(t, res, "Hunt closed", "Resolve inconclusive hunt", "Schedule recurring hunt", "rerun with 180d of data")
 }
 
 func TestLinkArtifactsTool(t *testing.T) {

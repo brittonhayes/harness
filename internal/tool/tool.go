@@ -31,6 +31,45 @@ type Schema struct {
 type Result struct {
 	Content string
 	IsError bool
+	Card    *Card
+}
+
+// Card is optional operator-facing metadata for rendering a semantic result in
+// the live TUI. It is never fed back to the model; Content remains the tool
+// result contract.
+type Card struct {
+	Kind        string
+	Title       string
+	Summary     string
+	Fields      []Field
+	Changes     []Change
+	Suggestions []Suggestion
+	Link        string
+}
+
+// Field is a label/value row in an operator-facing card.
+type Field struct {
+	Label string
+	Value string
+}
+
+// Change is a semantic state transition. Before may be empty for additions.
+type Change struct {
+	Label  string
+	Before string
+	After  string
+}
+
+// Suggestion is a queue_hunt-shaped prompt the operator may ask vala to queue.
+// It is display-only in this pass; it does not trigger any automatic write.
+type Suggestion struct {
+	Title      string
+	Trigger    string
+	Hypothesis string
+	Behavior   string
+	DataSource string
+	Priority   string
+	MITRE      string
 }
 
 // Text returns a successful result with the given content.

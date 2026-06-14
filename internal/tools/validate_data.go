@@ -51,7 +51,8 @@ func (t *ValidateData) Run(ctx context.Context, input json.RawMessage) (tool.Res
 	if err := json.Unmarshal(input, &in); err != nil {
 		return tool.Errorf("invalid input: %v", err), nil
 	}
-	if t.RC.HuntID == "" {
+	snap := t.RC.Snapshot()
+	if snap.HuntID == "" {
 		return tool.Errorf("no active hunt — call open_hunt first"), nil
 	}
 	if len(in.Sources) == 0 {
@@ -65,13 +66,23 @@ func (t *ValidateData) Run(ctx context.Context, input json.RawMessage) (tool.Res
 			claim = fmt.Sprintf("telemetry not validated for %s", strings.Join(in.Sources, ", "))
 		}
 		e := brain.Evidence{Claim: claim, Source: brain.EvidenceGap, Pointer: strings.Join(in.Sources, ", "), Confidence: "confirmed"}
-		id, err := t.RC.Brain.RecordFinding(ctx, t.RC.HuntID, e)
+		id, err := t.RC.Brain.RecordFinding(ctx, snap.HuntID, e)
 		if err != nil {
 			return tool.Errorf("failed to record visibility gap: %v", err), nil
 		}
 		e.ID = id
 		t.RC.addGap(e)
-		return tool.Text("recorded visibility gap " + id + " — this hunt is blind here. Either pivot to a data source you do have, or close with detection_tier tier5_none_documented and queue a forensic-readiness follow-up (queue_hunt) to get this telemetry."), nil
+		return textWithCard("recorded visibility gap "+id+" — this hunt is blind here. Either pivot to a data source you do have, or close with detection_tier tier5_none_documented and queue a forensic-readiness follow-up (queue_hunt) to get this telemetry.", tool.Card{
+			Kind:    "visibility_gap",
+			Title:   "Visibility gap recorded",
+			Summary: id,
+			Fields: fields(
+				field("sources", join(in.Sources)),
+				field("gap", claim),
+			),
+			Changes:     []tool.Change{{Label: "visibility gap", After: claim}},
+			Suggestions: []tool.Suggestion{visibilityGapSuggestion(in.Sources, claim)},
+		}), nil
 	}
 
 	e := brain.Evidence{
@@ -80,14 +91,23 @@ func (t *ValidateData) Run(ctx context.Context, input json.RawMessage) (tool.Res
 		Pointer:    summarizeDataPlan(in.Sources, in.TimeWindow, in.Completeness, in.Retention),
 		Confidence: "confirmed",
 	}
-	id, err := t.RC.Brain.RecordFinding(ctx, t.RC.HuntID, e)
+	id, err := t.RC.Brain.RecordFinding(ctx, snap.HuntID, e)
 	if err != nil {
 		return tool.Errorf("failed to record data plan: %v", err), nil
 	}
 	e.ID = id
 	t.RC.addEvidence(e)
 	t.RC.markDataPlanValidated()
-	return tool.Text("data plan validated (" + id + ") — telemetry is present. Proceed to query and record_finding."), nil
+	return textWithCard("data plan validated ("+id+") — telemetry is present. Proceed to query and record_finding.", tool.Card{
+		Kind:    "validate_data",
+		Title:   "Telemetry validated",
+		Summary: id,
+		Fields: fields(
+			field("sources", join(in.Sources)),
+			field("window", in.TimeWindow),
+		),
+		Changes: []tool.Change{{Label: "data plan", After: e.Pointer}},
+	}), nil
 }
 
 // summarizeDataPlan renders the data plan as a compact, single-line pointer.

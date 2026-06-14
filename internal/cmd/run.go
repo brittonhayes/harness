@@ -8,6 +8,7 @@ import (
 	"github.com/brittonhayes/vala/internal/agent"
 	"github.com/brittonhayes/vala/internal/permission"
 	"github.com/brittonhayes/vala/internal/session"
+	"github.com/brittonhayes/vala/internal/tool"
 	"github.com/spf13/cobra"
 )
 
@@ -75,8 +76,8 @@ func printEvents(sess *session.Session) agent.Events {
 			fmt.Fprintf(os.Stderr, "⚙ %s %s\n", name, summary)
 			sess.Add(session.Entry{Kind: session.KindToolCall, Tool: name, Content: summary})
 		},
-		OnToolResult: func(name, content string, isErr bool) {
-			sess.Add(session.Entry{Kind: session.KindToolResult, Tool: name, Content: content, IsError: isErr})
+		OnToolResult: func(name string, result tool.Result) {
+			sess.Add(session.Entry{Kind: session.KindToolResult, Tool: name, Content: result.Content, IsError: result.IsError})
 		},
 		OnPermissionDenied: func(name, summary string) {
 			fmt.Fprintf(os.Stderr, "✗ denied: %s\n", name)

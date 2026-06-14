@@ -24,6 +24,10 @@ func TestRememberWritesSharedMemory(t *testing.T) {
 	if !strings.Contains(res.Content, "alice") {
 		t.Fatalf("result should name the author: %q", res.Content)
 	}
+	assertCard(t, res, "Brain memory added", "memory", "auth logs live in Okta", "hunts_0001")
+	if strings.Contains(cardText(res), "alice") {
+		t.Fatalf("remember card should not show author: %#v", res.Card)
+	}
 
 	rows := mem.RowsIn(brain.DBMemory)
 	if len(rows) != 1 {

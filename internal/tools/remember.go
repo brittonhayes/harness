@@ -54,17 +54,27 @@ func (r *Remember) Run(ctx context.Context, input json.RawMessage) (tool.Result,
 		return tool.Errorf("no brain configured to remember into"), nil
 	}
 
+	snap := r.RC.Snapshot()
 	if _, err := r.RC.Brain.Remember(ctx, brain.Memory{
 		Fact:   fact,
-		Author: r.RC.Author,
-		Hunt:   r.RC.HuntID,
+		Author: snap.Author,
+		Hunt:   snap.HuntID,
 	}); err != nil {
 		return tool.Errorf("could not save memory: %v", err), nil
 	}
 
-	who := strings.TrimSpace(r.RC.Author)
+	who := strings.TrimSpace(snap.Author)
 	if who == "" {
 		who = "you"
 	}
-	return tool.Text(fmt.Sprintf("remembered (as %s), shared to the brain: %s", who, fact)), nil
+	return textWithCard(fmt.Sprintf("remembered (as %s), shared to the brain: %s", who, fact), tool.Card{
+		Kind:    "remember",
+		Title:   "Brain memory added",
+		Summary: "saved",
+		Fields: fields(
+			field("fact", fact),
+			field("linked hunt", snap.HuntID),
+		),
+		Changes: []tool.Change{{Label: "memory", After: fact}},
+	}), nil
 }

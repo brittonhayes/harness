@@ -31,10 +31,34 @@ type RunContext struct {
 	huntPageURL string           // set by store_hunt
 }
 
+// RunContextSnapshot is a consistent, immutable view of the session hunt state
+// for UI rendering and tool decisions that need multiple fields.
+type RunContextSnapshot struct {
+	HuntID       string
+	HuntQuestion string
+	HuntType     string
+	Author       string
+
+	Evidence []brain.Evidence
+	Gaps     []brain.Evidence
+
+	DataPlanValidated bool
+	CoverageUpdated   bool
+	HuntOutcome       string
+	HuntPageURL       string
+}
+
 // NewRunContext builds a RunContext over the given brain client. A hunt is set
 // later by the open_hunt tool via SetHunt.
 func NewRunContext(b *brain.Client) *RunContext {
 	return &RunContext{Brain: b}
+}
+
+// SetAuthor records the operator this session runs as.
+func (rc *RunContext) SetAuthor(author string) {
+	rc.mu.Lock()
+	defer rc.mu.Unlock()
+	rc.Author = author
 }
 
 // SetHunt records the active hunt opened by the open_hunt tool so the hunt
@@ -56,6 +80,38 @@ func (rc *RunContext) SetHunt(huntID, question, huntType string) {
 	rc.huntPageURL = ""
 }
 
+// Snapshot returns a consistent copy of all UI-relevant run state. It takes the
+// mutex once so a frame cannot mix fields from two different hunt states.
+func (rc *RunContext) Snapshot() RunContextSnapshot {
+	if rc == nil {
+		return RunContextSnapshot{}
+	}
+	rc.mu.Lock()
+	defer rc.mu.Unlock()
+	return rc.snapshotLocked()
+}
+
+func (rc *RunContext) snapshotLocked() RunContextSnapshot {
+	return RunContextSnapshot{
+		HuntID:            rc.HuntID,
+		HuntQuestion:      rc.HuntQuestion,
+		HuntType:          rc.huntType,
+		Author:            rc.Author,
+		Evidence:          cloneEvidence(rc.evidence),
+		Gaps:              cloneEvidence(rc.gaps),
+		DataPlanValidated: rc.dataPlanOK,
+		CoverageUpdated:   rc.coverageOK,
+		HuntOutcome:       rc.huntOutcome,
+		HuntPageURL:       rc.huntPageURL,
+	}
+}
+
+func cloneEvidence(in []brain.Evidence) []brain.Evidence {
+	out := make([]brain.Evidence, len(in))
+	copy(out, in)
+	return out
+}
+
 func (rc *RunContext) addEvidence(e brain.Evidence) {
 	rc.mu.Lock()
 	defer rc.mu.Unlock()
@@ -66,9 +122,7 @@ func (rc *RunContext) addEvidence(e brain.Evidence) {
 func (rc *RunContext) Evidence() []brain.Evidence {
 	rc.mu.Lock()
 	defer rc.mu.Unlock()
-	out := make([]brain.Evidence, len(rc.evidence))
-	copy(out, rc.evidence)
-	return out
+	return cloneEvidence(rc.evidence)
 }
 
 // HuntType returns the PEAK hunt style the active hunt was opened with.
@@ -97,9 +151,7 @@ func (rc *RunContext) addGap(e brain.Evidence) {
 func (rc *RunContext) Gaps() []brain.Evidence {
 	rc.mu.Lock()
 	defer rc.mu.Unlock()
-	out := make([]brain.Evidence, len(rc.gaps))
-	copy(out, rc.gaps)
-	return out
+	return cloneEvidence(rc.gaps)
 }
 
 // DataPlanValidated reports whether the data-validation stage has run.

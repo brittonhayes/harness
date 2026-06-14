@@ -44,18 +44,28 @@ func (t *RecordFinding) Run(ctx context.Context, input json.RawMessage) (tool.Re
 	if in.Claim == "" || in.Pointer == "" {
 		return tool.Errorf("claim and pointer are required"), nil
 	}
-	if t.RC.HuntID == "" {
+	snap := t.RC.Snapshot()
+	if snap.HuntID == "" {
 		return tool.Errorf("no active hunt"), nil
 	}
 	if in.Confidence == "" {
 		in.Confidence = "probable"
 	}
 	e := brain.Evidence{Claim: in.Claim, Source: in.Source, Pointer: in.Pointer, Confidence: in.Confidence}
-	id, err := t.RC.Brain.RecordFinding(ctx, t.RC.HuntID, e)
+	id, err := t.RC.Brain.RecordFinding(ctx, snap.HuntID, e)
 	if err != nil {
 		return tool.Errorf("failed to write finding: %v", err), nil
 	}
 	e.ID = id
 	t.RC.addEvidence(e)
-	return tool.Text("recorded finding " + id + " — cite this ID in the hunt's findings"), nil
+	return textWithCard("recorded finding "+id+" — cite this ID in the hunt's findings", tool.Card{
+		Kind:    "record_finding",
+		Title:   "Finding recorded",
+		Summary: id,
+		Fields: fields(
+			field("claim", in.Claim),
+			field("pointer", in.Pointer),
+		),
+		Changes: []tool.Change{{Label: "finding", After: in.Claim}},
+	}), nil
 }

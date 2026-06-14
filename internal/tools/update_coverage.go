@@ -63,5 +63,19 @@ func (t *UpdateCoverage) Run(ctx context.Context, input json.RawMessage) (tool.R
 		return tool.Errorf("failed to update coverage: %v", err), nil
 	}
 	t.RC.markCoverageUpdated()
-	return tool.Text("coverage updated (" + id + ") for " + in.Technique + ": " + in.Status), nil
+	card := tool.Card{
+		Kind:    "update_coverage",
+		Title:   "Coverage updated",
+		Summary: in.Technique,
+		Fields: fields(
+			field("status", in.Status),
+			field("fidelity", in.Fidelity),
+			field("detections", in.Detections),
+		),
+		Changes: []tool.Change{{Label: "coverage", After: in.Technique + " is " + in.Status}},
+	}
+	if in.Status == brain.CoverageThin || in.Status == brain.CoverageUncovered {
+		card.Suggestions = []tool.Suggestion{coverageSuggestion(in.Technique, in.Status)}
+	}
+	return textWithCard("coverage updated ("+id+") for "+in.Technique+": "+in.Status, card), nil
 }

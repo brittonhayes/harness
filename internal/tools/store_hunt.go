@@ -4,6 +4,7 @@ import (
 	"context"
 	_ "embed"
 	"encoding/json"
+	"fmt"
 	"strings"
 
 	"github.com/brittonhayes/vala/internal/brain"
@@ -67,7 +68,8 @@ func (t *StoreHunt) Run(ctx context.Context, input json.RawMessage) (tool.Result
 	if err := json.Unmarshal(input, &in); err != nil {
 		return tool.Errorf("invalid input: %v", err), nil
 	}
-	if t.RC.HuntID == "" {
+	snap := t.RC.Snapshot()
+	if snap.HuntID == "" {
 		return tool.Errorf("no active hunt"), nil
 	}
 	switch in.Outcome {
@@ -77,20 +79,20 @@ func (t *StoreHunt) Run(ctx context.Context, input json.RawMessage) (tool.Result
 	}
 
 	page := brain.HuntPage{
-		HuntID:            t.RC.HuntID,
-		Question:          t.RC.HuntQuestion,
+		HuntID:            snap.HuntID,
+		Question:          snap.HuntQuestion,
 		Hypothesis:        in.Hypothesis,
 		Status:            in.Outcome,
 		Findings:          in.Findings,
 		Hypotheses:        in.Hypotheses,
 		NextSteps:         in.NextSteps,
-		Evidence:          t.RC.Evidence(),
-		HuntType:          t.RC.HuntType(),
+		Evidence:          snap.Evidence,
+		HuntType:          snap.HuntType,
 		DetectionTier:     in.DetectionTier,
 		TierRationale:     in.TierRationale,
-		DataPlanValidated: t.RC.DataPlanValidated(),
-		Gaps:              t.RC.Gaps(),
-		CoverageUpdated:   t.RC.CoverageUpdated(),
+		DataPlanValidated: snap.DataPlanValidated,
+		Gaps:              snap.Gaps,
+		CoverageUpdated:   snap.CoverageUpdated,
 	}
 
 	// Enforce the full PEAK gate: citation discipline, validate-before-query, a
@@ -100,10 +102,10 @@ func (t *StoreHunt) Run(ctx context.Context, input json.RawMessage) (tool.Result
 	}
 
 	summary := summarizeFindings(in.Findings)
-	if err := t.RC.Brain.CloseHunt(ctx, t.RC.HuntID, in.Outcome, summary, in.DetectionTier, in.TierRationale); err != nil {
+	if err := t.RC.Brain.CloseHunt(ctx, snap.HuntID, in.Outcome, summary, in.DetectionTier, in.TierRationale); err != nil {
 		return tool.Errorf("failed to close hunt: %v", err), nil
 	}
-	url, err := t.RC.Brain.WriteHuntPage(ctx, t.RC.HuntID, page)
+	url, err := t.RC.Brain.WriteHuntPage(ctx, snap.HuntID, page)
 	if err != nil {
 		return tool.Errorf("failed to write hunt page: %v", err), nil
 	}
@@ -124,7 +126,18 @@ func (t *StoreHunt) Run(ctx context.Context, input json.RawMessage) (tool.Result
 		msg += "\n\nConvert: no detection — the rationale recorded is the deliverable. If a visibility gap blocked this hunt, queue a forensic-readiness follow-up with queue_hunt."
 	}
 	msg += "\n\nFeed back: call update_coverage to record this technique's coverage state, and queue any follow-on hypotheses with queue_hunt."
-	return tool.Text(msg), nil
+	return textWithCard(msg, tool.Card{
+		Kind:    "store_hunt",
+		Title:   "Hunt closed",
+		Summary: in.Outcome,
+		Fields: fields(
+			field("detection tier", in.DetectionTier),
+			field("evidence count", fmt.Sprintf("%d", len(snap.Evidence))),
+		),
+		Changes:     []tool.Change{{Label: "hunt", Before: brain.HuntOpen, After: "closed as " + in.Outcome}},
+		Suggestions: storeHuntSuggestions(in.Outcome, in.DetectionTier, in.NextSteps, snap.HuntQuestion),
+		Link:        url,
+	}), nil
 }
 
 func summarizeFindings(findings []brain.Claim) string {

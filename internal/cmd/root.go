@@ -203,7 +203,7 @@ func build() (*built, error) {
 	store := brainStore(cfg, cwd)
 	connectBrainSearch(cfg, store)
 	rc := tools.NewRunContext(brain.New(store))
-	rc.Author = resolveAuthor()
+	rc.SetAuthor(resolveAuthor())
 	registry := tools.Toolbox(cwd, rc, sk, evidence...)
 
 	return &built{

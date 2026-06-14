@@ -61,5 +61,15 @@ func (t *QueueHunt) Run(ctx context.Context, input json.RawMessage) (tool.Result
 	if err != nil {
 		return tool.Errorf("failed to queue hunt: %v", err), nil
 	}
-	return tool.Text("queued hunt " + id + " — open it with open_hunt (pass backlog_id=" + id + ") when you start hunting"), nil
+	return textWithCard("queued hunt "+id+" — open it with open_hunt (pass backlog_id="+id+") when you start hunting", tool.Card{
+		Kind:    "queue_hunt",
+		Title:   "Backlog item queued",
+		Summary: id,
+		Fields: fields(
+			field("hypothesis", in.Hypothesis),
+			field("data source", in.DataSource),
+			field("priority", in.Priority),
+		),
+		Changes: []tool.Change{{Label: "backlog", After: "queued: " + in.Hypothesis}},
+	}), nil
 }

@@ -13,6 +13,7 @@ import (
 	"github.com/brittonhayes/vala/internal/mcp"
 	"github.com/brittonhayes/vala/internal/permission"
 	"github.com/brittonhayes/vala/internal/session"
+	"github.com/brittonhayes/vala/internal/tool"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -88,8 +89,8 @@ func (r *REPL) events(p *tea.Program) agent.Events {
 	return agent.Events{
 		OnAssistantText: func(text string) { p.Send(assistantMsg(text)) },
 		OnToolCall:      func(name, summary string) { p.Send(toolCallMsg{name: name, summary: summary}) },
-		OnToolResult: func(name, content string, isErr bool) {
-			p.Send(toolResultMsg{name: name, content: content, isErr: isErr})
+		OnToolResult: func(name string, result tool.Result) {
+			p.Send(toolResultMsg{name: name, result: result})
 		},
 		OnPermissionDenied: func(name, summary string) {
 			p.Send(deniedMsg{name: name})
