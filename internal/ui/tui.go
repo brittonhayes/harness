@@ -31,6 +31,7 @@ const (
 	choicePlaceholder         = "Type a reply or adjustment for vala…"
 	brandGlyph                = "◇"
 	uiGutter                  = "  "
+	topPaddingRows            = 1
 	composerFooterPaddingRows = 1
 	bottomPaddingRows         = 1
 )
@@ -632,7 +633,11 @@ func (m chatModel) View() string {
 	if m.running {
 		box = m.styles.InputBoxBusy
 	}
-	parts := []string{m.vp.View()}
+	parts := []string{}
+	for range topPaddingRows {
+		parts = append(parts, "")
+	}
+	parts = append(parts, m.vp.View())
 	if menu := m.completionView(); menu != "" {
 		parts = append(parts, menu)
 	}
@@ -780,7 +785,11 @@ func (m chatModel) footer() string {
 	if len(parts) == 0 {
 		return ""
 	}
-	return uiGutter + strings.Join(parts, "   ")
+	return m.inputTextGutter() + strings.Join(parts, "   ")
+}
+
+func (m chatModel) inputTextGutter() string {
+	return uiGutter + strings.Repeat(" ", lipgloss.Width(m.ta.Prompt))
 }
 
 // banner is the curated session header, rendered as the first transcript block.
@@ -997,14 +1006,15 @@ func (m chatModel) inputLines() int {
 }
 
 // viewportHeight returns the rows available for the transcript after reserving
-// space for the status line, flat composer, footer, and bottom breathing room.
+// space for the top breathing room, status line, flat composer, footer, and
+// bottom breathing room.
 func (m chatModel) viewportHeight() int {
 	lines := 1
 	if m.ready {
 		lines = m.inputLines()
 	}
 	footer := m.footerHeight()
-	h := m.height - lines - m.statusHeight() - footer - composerFooterPaddingRows - bottomPaddingRows - m.completionHeight() - m.commandPanelHeight() - m.choiceHeight()
+	h := m.height - topPaddingRows - lines - m.statusHeight() - footer - composerFooterPaddingRows - bottomPaddingRows - m.completionHeight() - m.commandPanelHeight() - m.choiceHeight()
 	if h < 3 {
 		h = 3
 	}

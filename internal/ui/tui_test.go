@@ -317,10 +317,19 @@ func TestComposerIsFlatFullWidthAndGuttered(t *testing.T) {
 	if !strings.Contains(view, "\n"+uiGutter+"› hunt cloudtrail") {
 		t.Fatalf("composer prompt should sit on the shared gutter:\n%s", view)
 	}
+	if !strings.Contains(view, "\n"+m.inputTextGutter()+"shift+tab to cycle permissions") {
+		t.Fatalf("footer should align with the input text column:\n%s", view)
+	}
+	if strings.Contains(view, "\n"+uiGutter+"shift+tab to cycle permissions") {
+		t.Fatalf("footer should not align with the composer prompt column:\n%s", view)
+	}
 	if got, want := lipgloss.Width(uiGutter)+lipgloss.Width(m.ta.Prompt)+m.ta.Width(), m.width; got != want {
 		t.Fatalf("visual composer width = %d, want %d", got, want)
 	}
 	rows := strings.Split(view, "\n")
+	if len(rows) == 0 || strings.TrimSpace(rows[0]) != "" {
+		t.Fatalf("view should reserve top padding:\n%s", view)
+	}
 	composerRow := -1
 	for i, row := range rows {
 		if strings.Contains(row, uiGutter+"› hunt cloudtrail") {
