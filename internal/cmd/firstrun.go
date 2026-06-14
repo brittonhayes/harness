@@ -61,6 +61,8 @@ func firstRunNotice(cfg config.Config, cwd string) error {
 		gaps = append(gaps, "no brain — findings will not persist (run `vala setup`)")
 	} else if brainConfigured(cfg) && !brainComplete(cfg) {
 		gaps = append(gaps, "Notion brain is incomplete — some stores are missing (run `vala setup` to repair)")
+	} else if brainConfigured(cfg) && !notionSearchConfigured(cfg) {
+		gaps = append(gaps, "Notion brain search is not configured — recall will be weak (run `vala setup`)")
 	}
 	if !evidenceConfigured(cfg) {
 		gaps = append(gaps, "no evidence sources — nothing to hunt in (run `vala setup`)")

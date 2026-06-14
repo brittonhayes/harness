@@ -309,7 +309,18 @@ func summarize(name string, input json.RawMessage) string {
 	case "grep", "glob":
 		return get("pattern")
 	case "recall":
-		return get("query")
+		query := strings.TrimSpace(get("query"))
+		scope := strings.TrimSpace(get("scope"))
+		if scope == "" {
+			scope = "all"
+		}
+		if query == "" {
+			return "list recent brain rows"
+		}
+		if scope == "all" {
+			return "search brain for " + query
+		}
+		return "search " + scope + " for " + query
 	}
 	// Fallback (MCP and other tools we don't special-case): render the input
 	// object as a compact, readable "key: value" list rather than raw JSON, so

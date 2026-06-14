@@ -78,11 +78,13 @@ func (t *Recall) Run(ctx context.Context, input json.RawMessage) (tool.Result, e
 
 	var b strings.Builder
 	total := 0
+	backend := brain.RecallBackendScan
 	for _, s := range recallScopes {
 		if in.Scope != "all" && in.Scope != s.name {
 			continue
 		}
-		rows, err := t.RC.Brain.Recall(ctx, s.db, in.Query, in.Limit)
+		rows, gotBackend, err := t.RC.Brain.RecallWithBackend(ctx, s.db, in.Query, in.Limit)
+		backend = gotBackend
 		if err != nil {
 			fmt.Fprintf(&b, "%s: recall failed: %v\n\n", s.name, err)
 			continue
@@ -104,11 +106,13 @@ func (t *Recall) Run(ctx context.Context, input json.RawMessage) (tool.Result, e
 			subject = "artifacts"
 		}
 		if in.Query == "" {
-			return tool.Text(fmt.Sprintf("The brain has no %s yet.", subject)), nil
+			return tool.Text(fmt.Sprintf("Recall: %s\n\nThe brain has no %s yet.", recallBackendLabel(backend, in.Query), subject)), nil
 		}
-		return tool.Text(fmt.Sprintf("No prior %s match %q — this looks like new ground.", subject, in.Query)), nil
+		return tool.Text(fmt.Sprintf("Recall: %s\n\nNo prior %s match %q — this looks like new ground.", recallBackendLabel(backend, in.Query), subject, in.Query)), nil
 	}
-	return tool.Text(strings.TrimSpace(b.String())), nil
+	b.WriteString("\n")
+	out := fmt.Sprintf("Recall: %s\n\n%s", recallBackendLabel(backend, in.Query), strings.TrimSpace(b.String()))
+	return tool.Text(out), nil
 }
 
 // runSearch answers recall through the brain's search backend in a single call.
@@ -120,7 +124,7 @@ func (t *Recall) runSearch(ctx context.Context, scope, query string, limit int) 
 	if scope != "all" {
 		db = scopeDB(scope)
 	}
-	rows, err := t.RC.Brain.Recall(ctx, db, query, limit)
+	rows, backend, err := t.RC.Brain.RecallWithBackend(ctx, db, query, limit)
 	if err != nil {
 		return tool.Errorf("recall search failed: %v", err), nil
 	}
@@ -129,9 +133,10 @@ func (t *Recall) runSearch(ctx context.Context, scope, query string, limit int) 
 		if subject == "all" {
 			subject = "artifacts"
 		}
-		return tool.Text(fmt.Sprintf("No prior %s match %q — this looks like new ground.", subject, query)), nil
+		return tool.Text(fmt.Sprintf("Recall: %s\n\nNo prior %s match %q — this looks like new ground.", recallBackendLabel(backend, query), subject, query)), nil
 	}
 	var b strings.Builder
+	fmt.Fprintf(&b, "Recall: %s\n\n", recallBackendLabel(backend, query))
 	fmt.Fprintf(&b, "## %s (%d)\n", scope, len(rows))
 	for _, r := range rows {
 		line := summarizeSearch(r)
@@ -142,6 +147,20 @@ func (t *Recall) runSearch(ctx context.Context, scope, query string, limit int) 
 		}
 	}
 	return tool.Text(strings.TrimSpace(b.String())), nil
+}
+
+func recallBackendLabel(backend brain.RecallBackend, query string) string {
+	switch backend {
+	case brain.RecallBackendSearch:
+		return "searched with Notion MCP"
+	case brain.RecallBackendSearchFailed:
+		return "Notion MCP search failed"
+	default:
+		if strings.TrimSpace(query) == "" {
+			return "listed recent brain rows; search was not used"
+		}
+		return "used the literal row scan because Notion MCP search is not configured"
+	}
 }
 
 // scopeDB maps a recall scope name to its brain database (empty if unknown).

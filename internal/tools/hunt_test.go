@@ -317,3 +317,31 @@ func TestRecallTool(t *testing.T) {
 		t.Fatalf("expected a new-ground message, got: %q", miss.Content)
 	}
 }
+
+type recallSearchMem struct {
+	*brain.Mem
+	rows []brain.Row
+	err  error
+}
+
+func (m *recallSearchMem) SearchEnabled() bool { return true }
+
+func (m *recallSearchMem) Search(context.Context, string, string, int) ([]brain.Row, error) {
+	return m.rows, m.err
+}
+
+func TestRecallToolReportsSearchBackend(t *testing.T) {
+	store := &recallSearchMem{
+		Mem:  brain.NewMem(),
+		rows: []brain.Row{{ID: "p1", Props: map[string]any{"title": "prior GuardDuty hunt"}}},
+	}
+	rec := &Recall{RC: NewRunContext(brain.New(store))}
+
+	res := run(t, rec, map[string]any{"query": "guardduty"})
+	if res.IsError {
+		t.Fatalf("recall failed: %s", res.Content)
+	}
+	if !strings.Contains(res.Content, "Recall: searched with Notion MCP") {
+		t.Fatalf("recall did not report search backend: %q", res.Content)
+	}
+}

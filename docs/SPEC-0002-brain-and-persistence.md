@@ -283,14 +283,19 @@ A store MAY implement `Searcher` — `SearchEnabled() bool` and
 `Search(ctx, db, query, limit) → []Row` — to answer free-text recall with the
 backend's own relevance-ranked search instead of the client-side window scan.
 When the active store reports `SearchEnabled`, `Recall` routes a **non-empty**
-query through `Search` and falls back to the window scan only if it errors; an
-empty query (list-recent) always uses the scan. `NTN` implements `Searcher` via
+query through `Search`; an empty query (list-recent) always uses the scan.
+Search errors are returned instead of silently falling back, because semantic
+recall must not pretend a literal row scan is equivalent. `NTN` implements `Searcher` via
 an injected `SearchFn`: when a Notion MCP server is configured (the `mcp` entry
 named `notion`, see [SPEC-0007](SPEC-0007-evidence-and-mcp.md)), vala connects it
 at startup, discovers its search tool, and wires it in — so recall becomes one
 full-text, relevance-ranked search over the brain rather than a 100-row scan.
+Notion brain onboarding treats this MCP server as part of the brain: it defaults
+to Notion's hosted MCP endpoint and allows a custom Notion MCP-compatible URL.
 The Notion search server is **not** exposed to the agent as an evidence tool:
-`recall` stays the single curated read surface over the brain. Search results
+`recall` stays the single curated read surface over the brain. `ntn` is the
+literal Notion CLI for explicit page/API operations, not the MCP search backend.
+Search results
 are loose — a title/snippet/URL, not schema-shaped props — because recall reads
 them for context, not as structured records. `Client.HasSearch()` reports
 whether a backend is wired so the `recall` tool can issue one search rather than

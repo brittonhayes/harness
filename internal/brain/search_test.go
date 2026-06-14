@@ -72,7 +72,7 @@ func TestRecallEmptyQuerySkipsSearch(t *testing.T) {
 	}
 }
 
-func TestRecallFallsBackWhenSearchFails(t *testing.T) {
+func TestRecallReturnsSearchErrors(t *testing.T) {
 	ctx := context.Background()
 	sm := &searchMem{Mem: NewMem(), enabled: true, err: errors.New("notion down")}
 	bc := New(sm)
@@ -80,13 +80,9 @@ func TestRecallFallsBackWhenSearchFails(t *testing.T) {
 		t.Fatalf("seed: %v", err)
 	}
 
-	// Search errors, so recall degrades to the window scan rather than failing.
-	got, err := bc.Recall(ctx, DBHunts, "DeleteDetector", 5)
-	if err != nil {
-		t.Fatalf("Recall: %v", err)
-	}
-	if len(got) != 1 || got[0].Props["behavior"] != "DeleteDetector" {
-		t.Fatalf("expected window-scan fallback row, got %+v", got)
+	// Dynamic recall must not silently downgrade from search to a literal scan.
+	if _, err := bc.Recall(ctx, DBHunts, "DeleteDetector", 5); err == nil {
+		t.Fatal("expected search failure to be returned")
 	}
 }
 

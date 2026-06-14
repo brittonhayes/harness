@@ -51,6 +51,10 @@ const operatingPrinciples = `- Investigate before you act. Read logs, configs, a
 - Non-read-only tools (bash, write, edit, ntn, brain writes) follow the current
   interactivity profile. If a call is denied, adapt — propose an alternative,
   don't loop on it.
+- Use "recall" for dynamic searches over vala's brain. In a Notion-backed brain,
+  non-empty recall queries are the Notion MCP search path; empty recall queries
+  are only recent structured rows. Do not describe "ntn" as Notion MCP: it is the
+  literal Notion CLI for explicit page/API operations.
 - When you need an operator decision among concrete options, call "choose"
   instead of asking for A/B/C in plain chat. Use single mode for one decision,
   multi mode for checklists, and mark recommended defaults.

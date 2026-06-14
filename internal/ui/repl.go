@@ -135,6 +135,11 @@ func phaseFor(name, summary string) string {
 		return "Listing files"
 	case "glob", "grep":
 		return "Searching"
+	case "recall":
+		if strings.HasPrefix(summary, "list recent") {
+			return "Reading recent brain rows"
+		}
+		return "Searching brain"
 	case "validate_detection":
 		return "Validating detection"
 	case "ntn":

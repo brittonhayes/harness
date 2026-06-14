@@ -68,8 +68,12 @@ It does **not** define the tool interface (that is
   search backend, not an evidence source: vala MUST route its search tool into
   recall (see [SPEC-0002](SPEC-0002-brain-and-persistence.md)) and MUST NOT
   expose its tools to the agent, so `recall` stays the single curated read
-  surface over the brain. A connect or discovery failure MUST degrade recall to
-  the client-side window scan with a warning, never block the session.
+  surface over the brain. Notion brain onboarding MUST configure this server as
+  part of the brain flow, defaulting to `https://mcp.notion.com/mcp` while
+  allowing a custom Notion MCP-compatible URL. A connect or discovery failure at
+  startup MUST warn without blocking the session; a non-empty semantic recall
+  attempted through a configured-but-failing MCP search backend MUST fail
+  visibly rather than silently degrade to a literal client-side row scan.
 
 ### File & shell tools
 

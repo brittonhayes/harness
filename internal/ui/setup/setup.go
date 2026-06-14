@@ -34,6 +34,7 @@ const (
 	screenProviderBusy
 	screenBrainPick
 	screenBrainNotionPage // parent-page prompt before a fresh provision
+	screenBrainNotionMCP  // Notion MCP URL prompt for recall/search
 	screenBrainNotionBusy // provisioning/repairing the Notion brain
 	screenBrainNotionDone // provision/repair result
 	screenEvidencePick
@@ -46,20 +47,22 @@ const (
 // setup-state detection; a step that is already satisfied renders as ✓ and is
 // skippable, so re-running the wizard to add one missing piece is painless.
 type Options struct {
-	Cwd        string
-	ProviderOK bool
-	BrainOK    bool
-	Model      string   // active provider·model label, for the ✓ provider row
-	Brain      string   // current brain summary (e.g. "on-disk" / "Notion" / "none")
-	Evidence   []string // names of evidence sources already configured in .vala.json
-	Force      bool     // unused hook for future "show all" behavior
+	Cwd           string
+	ProviderOK    bool
+	BrainOK       bool
+	Model         string   // active provider·model label, for the ✓ provider row
+	Brain         string   // current brain summary (e.g. "on-disk" / "Notion" / "none")
+	BrainSearchOK bool     // whether the Notion brain's reserved MCP search backend is configured
+	Evidence      []string // names of evidence sources already configured in .vala.json
+	Force         bool     // unused hook for future "show all" behavior
 
 	// Notion is the brain's currently-configured Notion IDs (empty when no Notion
 	// brain is set up). The Notion sub-flow uses it to decide between repairing an
 	// existing database in place and provisioning a new one.
 	Notion brain.DBIDs
 	// BrainNeedsRepair is set when the caller detected a configured-but-incomplete
-	// Notion brain, so the wizard opens straight into the Notion repair path.
+	// Notion brain or missing Notion MCP search, so the wizard opens instead of
+	// letting a dismissed setup prompt hide the broken brain state.
 	BrainNeedsRepair bool
 }
 

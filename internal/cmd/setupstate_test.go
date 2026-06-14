@@ -14,6 +14,10 @@ func TestEvidenceConfigured(t *testing.T) {
 	if !evidenceConfigured(cfg) {
 		t.Error("a configured MCP server should report configured")
 	}
+	onlyNotion := config.Config{MCP: []config.MCPServer{{Name: config.NotionSearchServerName}}}
+	if evidenceConfigured(onlyNotion) {
+		t.Error("the reserved Notion MCP server should not count as evidence")
+	}
 }
 
 func TestProviderConfiguredFromEnv(t *testing.T) {
@@ -57,7 +61,11 @@ func TestSetupCompleteRequiresAllThree(t *testing.T) {
 	}
 	complete := partial
 	complete.Notion = fullNotion
+	if setupComplete(complete) {
+		t.Error("a complete Notion brain without Notion MCP search should be incomplete")
+	}
+	complete.MCP = append(complete.MCP, config.MCPServer{Name: config.NotionSearchServerName, URL: config.DefaultNotionMCPURL, OAuth: true})
 	if !setupComplete(complete) {
-		t.Error("a complete Notion brain should satisfy setup")
+		t.Error("a complete Notion brain with Notion MCP search should satisfy setup")
 	}
 }

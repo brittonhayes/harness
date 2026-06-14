@@ -88,3 +88,23 @@ func TestLoadResolvesEnvPassthrough(t *testing.T) {
 		t.Errorf("unset env var should not be present: %v", env)
 	}
 }
+
+func TestSaveMCPStripsInvisibleURLCharacters(t *testing.T) {
+	dir := t.TempDir()
+	rawURL := "https://mcp-dev.notion.com/mcp\u2060 \u2060"
+	if err := SaveMCP(dir, MCPServer{Name: NotionSearchServerName, URL: rawURL, OAuth: true}); err != nil {
+		t.Fatalf("SaveMCP: %v", err)
+	}
+
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	srv, ok := cfg.NotionSearchServer()
+	if !ok {
+		t.Fatal("notion MCP server not saved")
+	}
+	if srv.URL != "https://mcp-dev.notion.com/mcp" {
+		t.Fatalf("URL = %q", srv.URL)
+	}
+}

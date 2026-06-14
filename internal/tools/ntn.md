@@ -1,6 +1,13 @@
-Interact with Notion through the official `ntn` CLI. Use this to read and
-write runbooks, incident timelines, detection write-ups, and other security
-documentation that lives in Notion.
+Interact with Notion through the official `ntn` CLI. This is a literal Notion
+CLI/API wrapper, not the Notion MCP server and not the brain's semantic recall
+path. Use it to read and write specific runbooks, incident timelines, detection
+write-ups, and other security documentation when you know the page, data source,
+or API operation you want.
+
+For dynamic questions about what vala's brain already knows — prior hunts,
+intel, coverage, detections, backlog items, or related work — use `recall`
+instead. With a Notion brain, `recall` routes non-empty searches through Notion
+MCP.
 
 You pass the arguments exactly as you would on the command line, as an array.
 Available subcommands (run with `--help` to discover flags):

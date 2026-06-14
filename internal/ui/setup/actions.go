@@ -27,6 +27,12 @@ type evidenceValidatedMsg struct {
 	status mcp.EvidenceStatus
 }
 
+// notionSearchValidatedMsg carries the result of validating the reserved Notion
+// MCP server used by the brain's recall/search path.
+type notionSearchValidatedMsg struct {
+	status mcp.EvidenceStatus
+}
+
 // notionCheckedMsg reports whether the Notion CLI is authenticated and, when it
 // is, the health of any configured brain: whether the parent database resolves
 // and which stores are missing or unreachable.
@@ -132,6 +138,26 @@ func validateEvidenceCmd(ctx context.Context, srv config.MCPServer) tea.Cmd {
 	return func() tea.Msg {
 		_, status := tools.ConnectEvidence(ctx, resolveServer(srv))
 		return evidenceValidatedMsg{status: status}
+	}
+}
+
+// validateNotionSearchCmd dials the reserved Notion MCP server and verifies it
+// exposes a search tool before the Notion brain setup counts as complete.
+func validateNotionSearchCmd(ctx context.Context, srv config.MCPServer) tea.Cmd {
+	return func() tea.Msg {
+		status := mcp.EvidenceStatus{Name: srv.Name, Transport: srv.Transport}
+		sess, err := mcp.Connect(ctx, resolveServer(srv))
+		if err != nil {
+			status.Err = err
+			return notionSearchValidatedMsg{status: status}
+		}
+		defer sess.Close()
+		if _, err := tools.NotionSearchHook(ctx, sess); err != nil {
+			status.Err = err
+			return notionSearchValidatedMsg{status: status}
+		}
+		status.Tools = 1
+		return notionSearchValidatedMsg{status: status}
 	}
 }
 

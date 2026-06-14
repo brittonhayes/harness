@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
+	"unicode"
 
 	"github.com/brittonhayes/vala/internal/brain"
 )
@@ -42,6 +44,7 @@ func SaveBrainFile(cwd, brainFile string) error {
 // resolved APIKey/Env fields are tagged json:"-", so only the env-var names are
 // persisted.
 func SaveMCP(cwd string, server MCPServer) error {
+	server = cleanMCPServer(server)
 	servers, err := loadMCP(cwd)
 	if err != nil {
 		return err
@@ -58,6 +61,21 @@ func SaveMCP(cwd string, server MCPServer) error {
 		servers = append(servers, server)
 	}
 	return saveKey(cwd, "mcp", servers)
+}
+
+func cleanMCPServer(server MCPServer) MCPServer {
+	server.URL = cleanURL(server.URL)
+	return server
+}
+
+func cleanURL(s string) string {
+	s = strings.Map(func(r rune) rune {
+		if unicode.Is(unicode.Cf, r) {
+			return -1
+		}
+		return r
+	}, s)
+	return strings.TrimSpace(s)
 }
 
 // loadMCP reads just the "mcp" array from the project's .vala.json, returning an

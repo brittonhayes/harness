@@ -16,6 +16,8 @@ func TestSummarize(t *testing.T) {
 		{"write uses path", "write", map[string]any{"path": "detections/x.yml", "content": "..."}, "detections/x.yml"},
 		{"ntn joins args", "ntn", map[string]any{"args": []any{"pages", "list"}}, "ntn pages list"},
 		{"grep uses pattern", "grep", map[string]any{"pattern": "AssumeRole"}, "AssumeRole"},
+		{"recall empty explains recent rows", "recall", map[string]any{"query": ""}, "list recent brain rows"},
+		{"recall query explains search", "recall", map[string]any{"query": "guardduty", "scope": "hunts"}, "search hunts for guardduty"},
 		// Unknown/MCP tools render a compact, sorted "key: value" glance rather
 		// than raw JSON, with arrays comma-joined and integers un-floated.
 		{"mcp tool flattens args", "wiz_list_cloud_events",

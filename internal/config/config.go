@@ -252,6 +252,11 @@ func hasMCPServer(servers []MCPServer, name string) bool {
 // tool so recall stays the single curated read surface over the brain.
 const NotionSearchServerName = "notion"
 
+// DefaultNotionMCPURL is Notion's hosted Streamable HTTP MCP endpoint. Setup
+// pre-fills it while still allowing operators to point vala at a custom Notion
+// MCP-compatible server.
+const DefaultNotionMCPURL = "https://mcp.notion.com/mcp"
+
 // NotionSearchServer returns the configured MCP server that backs brain search
 // (the one named "notion"), if any.
 func (c Config) NotionSearchServer() (MCPServer, bool) {

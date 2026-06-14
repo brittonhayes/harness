@@ -145,6 +145,10 @@ specs that consume them (model/compaction to
 ```
 
 `api_key` is never written; it is resolved from `api_key_env` at load.
+The reserved server name `notion` is part of Notion brain setup, not an evidence
+source. Setup writes it as an OAuth HTTP server, defaulting to
+`https://mcp.notion.com/mcp`, and allows operators to replace the URL with a
+custom Notion MCP-compatible endpoint.
 
 ### Providers & model resolution
 
@@ -221,6 +225,7 @@ the file if absent).
   "context_window": 200000,
   "auto_compact_threshold": 0.8,
   "mcp": [
+    { "name": "notion", "url": "https://mcp.notion.com/mcp", "oauth": true },
     { "name": "scanner", "url": "https://acme.scanner.dev/mcp", "api_key_env": "SCANNER_API_KEY" }
   ],
   "notion": { "database": "...", "evidence": "...", "hunts": "...", "intel": "...", "detections": "...", "backlog": "...", "memory": "...", "coverage": "...", "page_parent": "..." }

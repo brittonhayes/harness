@@ -25,6 +25,8 @@ func (m model) View() string {
 		body = m.viewBusy()
 	case screenBrainNotionPage:
 		body = m.viewNotionPage()
+	case screenBrainNotionMCP:
+		body = m.viewNotionMCP()
 	case screenBrainNotionDone:
 		body = m.viewNotionResult()
 	case screenEvidenceResult:
@@ -197,6 +199,19 @@ func (m model) viewNotionPage() string {
 	return b.String()
 }
 
+// viewNotionMCP prompts for the hosted or custom Notion MCP server that powers
+// recall. It is part of Notion brain setup, not an evidence source.
+func (m model) viewNotionMCP() string {
+	var b strings.Builder
+	b.WriteString(m.header("Notion brain") + "\n\n")
+	b.WriteString(m.styles.Assistant.Render("Connect Notion MCP so recall uses Notion search, not the fallback scan.") + "\n\n")
+	b.WriteString(m.styles.ToolMeta.Render(m.form.specs[0].label) + "\n")
+	b.WriteString("  " + m.form.inputs[0].View() + "\n\n")
+	b.WriteString(m.styles.Hint.Render("Default is Notion's hosted production MCP server.") + "\n\n")
+	b.WriteString(m.footerHint("enter connect · esc skip"))
+	return b.String()
+}
+
 // viewNotionResult shows the outcome of provisioning or repairing the brain.
 func (m model) viewNotionResult() string {
 	var b strings.Builder
@@ -208,7 +223,7 @@ func (m model) viewNotionResult() string {
 		b.WriteString(m.styles.Hint.Render("Run `ntn login` and confirm the page is shared, then retry.") + "\n\n")
 	} else {
 		b.WriteString(m.styles.Prompt.Render("✓ ") + m.styles.Assistant.Render(m.notionMsg) + "\n\n")
-		b.WriteString(m.styles.Hint.Render("Hunts, intel, and detections now persist to Notion.") + "\n\n")
+		b.WriteString(m.styles.Hint.Render("Hunts, intel, detections, and recall now use Notion.") + "\n\n")
 	}
 	b.WriteString(m.footerHint("enter back to setup"))
 	return b.String()

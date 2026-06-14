@@ -47,6 +47,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.screen = screenEvidenceResult
 		return m, nil
 
+	case notionSearchValidatedMsg:
+		return m.onNotionSearchValidated(msg)
+
 	case tea.KeyMsg:
 		if msg.String() == "ctrl+c" {
 			m.result.Quit = true
@@ -75,7 +78,7 @@ func (m model) onKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m.choose()
 		}
 
-	case screenProviderOAuth, screenProviderKey, screenProviderLocal, screenEvidenceForm, screenBrainNotionPage:
+	case screenProviderOAuth, screenProviderKey, screenProviderLocal, screenEvidenceForm, screenBrainNotionPage, screenBrainNotionMCP:
 		if key == "esc" {
 			return m.onEsc()
 		}
@@ -337,6 +340,9 @@ func (m model) submitForm() (tea.Model, tea.Cmd) {
 		m.busyLabel = "Provisioning the Notion brain…"
 		return m, provisionNotionCmd(m.ctx, m.opts.Cwd, page)
 
+	case screenBrainNotionMCP:
+		return m.submitNotionSearch()
+
 	case screenEvidenceForm:
 		return m.submitEvidence()
 	}
@@ -430,6 +436,18 @@ func (m model) startNotion() (tea.Model, tea.Cmd) {
 	return m, checkNotionCmd(m.ctx, m.opts.Cwd, m.opts.Notion)
 }
 
+// startNotionSearch prompts for the MCP server backing Notion brain recall.
+func (m model) startNotionSearch() (tea.Model, tea.Cmd) {
+	m.form = newForm(fieldSpec{
+		key:         "url",
+		label:       "Notion MCP URL",
+		placeholder: config.DefaultNotionMCPURL,
+		value:       config.DefaultNotionMCPURL,
+	})
+	m.screen = screenBrainNotionMCP
+	return m, nil
+}
+
 // onNotionChecked routes on the auth + health probe: log in if unauthenticated,
 // repair in place when the database survives but stores are missing, report a
 // healthy brain, or prompt for a parent page to provision a fresh one.
@@ -446,6 +464,9 @@ func (m model) onNotionChecked(msg notionCheckedMsg) (tea.Model, tea.Cmd) {
 	}
 	switch {
 	case msg.databaseOK && len(msg.missing) == 0:
+		if !m.opts.BrainSearchOK {
+			return m.startNotionSearch()
+		}
 		// Already complete — nothing to do but confirm.
 		m.brainDone = true
 		m.opts.Brain = "Notion (shared)"
@@ -488,14 +509,50 @@ func (m model) onNotionProvisioned(msg notionProvisionedMsg) (tea.Model, tea.Cmd
 		m.screen = screenBrainNotionDone
 		return m, nil
 	}
-	m.brainDone = true
 	m.result.BrainNotion = true
-	m.opts.Brain = "Notion (shared)"
 	if len(msg.repaired) > 0 {
 		m.notionMsg = "Repaired " + strings.Join(msg.repaired, ", ") + "."
 	} else {
 		m.notionMsg = "Notion brain provisioned — one database, all stores."
 	}
+	if !m.opts.BrainSearchOK {
+		return m.startNotionSearch()
+	}
+	m.brainDone = true
+	m.opts.Brain = "Notion (shared)"
+	m.screen = screenBrainNotionDone
+	return m, nil
+}
+
+func (m model) submitNotionSearch() (tea.Model, tea.Cmd) {
+	url := strings.TrimSpace(m.form.value("url"))
+	if url == "" {
+		url = config.DefaultNotionMCPURL
+	}
+	srv := config.MCPServer{Name: config.NotionSearchServerName, Transport: "http", URL: url, OAuth: true}
+	if err := config.SaveMCP(m.opts.Cwd, srv); err != nil {
+		m.errMsg = "save .vala.json: " + err.Error()
+		return m, nil
+	}
+	m.pendingServer = srv
+	m.screen = screenBrainNotionBusy
+	m.busyLabel = "Connecting Notion MCP…"
+	return m, validateNotionSearchCmd(m.ctx, srv)
+}
+
+func (m model) onNotionSearchValidated(msg notionSearchValidatedMsg) (tea.Model, tea.Cmd) {
+	if !msg.status.OK() {
+		m.notionErr = msg.status.Err
+		m.screen = screenBrainNotionDone
+		return m, nil
+	}
+	m.opts.BrainSearchOK = true
+	m.brainDone = true
+	m.opts.Brain = "Notion (shared)"
+	if m.notionMsg == "" {
+		m.notionMsg = "Notion brain is healthy."
+	}
+	m.notionMsg += " Recall is backed by Notion MCP search."
 	m.screen = screenBrainNotionDone
 	return m, nil
 }

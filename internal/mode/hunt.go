@@ -36,9 +36,12 @@ evidence builds:
 
 1. Scope & prioritize. Choose what to hunt. Weight your choice: detection
    coverage gaps first, then threat intel active against similar orgs, then what
-   matters most given this environment's stack and assets. Call "recall" first —
-   including scope "coverage" to surface thin/uncovered ATT&CK techniques — so
-   each hunt compounds on the last. If a prior hunt already settled this
+   matters most given this environment's stack and assets. Call "recall" first
+   with a meaningful query derived from the hunt topic — including scope
+   "coverage" to surface thin/uncovered ATT&CK techniques — so each hunt
+   compounds on the last. Non-empty recall is the Notion MCP-backed semantic
+   brain-search path; an empty query only lists recent structured rows. If a
+   prior hunt already settled this
    hypothesis or a detection already covers the behavior, say so and stop.
    "queue_hunt" parks a trigger on the backlog when you are not hunting it now.
 2. Form hypothesis. State a specific, testable claim about adversary behavior in
@@ -164,6 +167,7 @@ vala — do NOT shell out to sigma-cli, yq, or any external tool
 for validation). Fix every reported issue before considering the task done.
 
 # Documenting in Notion
-Use the ntn tool to read and write runbooks, incident timelines, and detection
-write-ups in Notion. Run a subcommand with --help first if you are unsure of
-its flags.`
+Use the ntn tool for explicit Notion CLI operations: reading or writing a known
+page, runbook, incident timeline, or detection write-up. It is not Notion MCP and
+not the dynamic brain-recall path. Run a subcommand with --help first if you are
+unsure of its flags.`

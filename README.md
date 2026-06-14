@@ -298,6 +298,7 @@ provider's own key env such as `ANTHROPIC_API_KEY` / `OPENAI_API_KEY`).
   "context_window": 200000,
   "auto_compact_threshold": 0.8,
   "mcp": [
+    { "name": "notion", "url": "https://mcp.notion.com/mcp", "oauth": true },
     { "name": "scanner", "url": "https://<your>.scanner.dev/mcp", "api_key_env": "SCANNER_API_KEY" },
     { "name": "wiz", "url": "https://mcp.app.wiz.io/", "oauth": true }
   ],
@@ -308,8 +309,14 @@ provider's own key env such as `ANTHROPIC_API_KEY` / `OPENAI_API_KEY`).
 }
 ```
 
-**Evidence sources.** vala's evidence comes from MCP servers under `mcp` — this is
-what it actually hunts in. The fastest way to connect one is the guided setup,
+**Notion search and evidence sources.** The reserved MCP server named `notion`
+belongs to the brain: it powers `recall` with Notion MCP search and is not
+exposed as a hunting evidence tool. Guided setup configures it as part of the
+Notion brain flow, defaulting to Notion's hosted production MCP URL while letting
+you provide your own Notion MCP-compatible URL.
+
+Every other MCP server under `mcp` is evidence — this is what vala actually
+hunts in. The fastest way to connect one is the guided setup,
 which runs automatically the first time vala detects it isn't fully wired up, and
 on demand any time:
 
