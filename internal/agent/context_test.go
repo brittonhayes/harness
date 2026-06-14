@@ -7,15 +7,27 @@ import (
 	"testing"
 )
 
+func tempUserConfigDir(t *testing.T) string {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", home)
+	t.Setenv("HOME", home)
+	dir, err := os.UserConfigDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
 func TestLoadOperatorContextEmpty(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	tempUserConfigDir(t)
 	if got := LoadOperatorContext(t.TempDir()); got != "" {
 		t.Fatalf("expected empty operator context, got %q", got)
 	}
 }
 
 func TestLoadOperatorContextProject(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	tempUserConfigDir(t)
 	work := t.TempDir()
 	want := "## Log sources\nauth -> Okta"
 	if err := os.WriteFile(filepath.Join(work, OperatorContextFile), []byte(want+"\n\n"), 0o644); err != nil {
@@ -27,8 +39,7 @@ func TestLoadOperatorContextProject(t *testing.T) {
 }
 
 func TestLoadOperatorContextMergesGlobalThenProject(t *testing.T) {
-	cfg := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", cfg)
+	cfg := tempUserConfigDir(t)
 	if err := os.MkdirAll(filepath.Join(cfg, "vala"), 0o755); err != nil {
 		t.Fatal(err)
 	}

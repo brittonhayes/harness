@@ -10,11 +10,15 @@ import (
 // the real ~/.config/vala/auth.json.
 func withTempConfig(t *testing.T) string {
 	t.Helper()
-	dir := t.TempDir()
+	home := t.TempDir()
 	// UserConfigDir honors XDG_CONFIG_HOME on Linux and falls back to HOME
 	// elsewhere; set both so the test is portable.
-	t.Setenv("XDG_CONFIG_HOME", dir)
-	t.Setenv("HOME", dir)
+	t.Setenv("XDG_CONFIG_HOME", home)
+	t.Setenv("HOME", home)
+	dir, err := os.UserConfigDir()
+	if err != nil {
+		t.Fatal(err)
+	}
 	return dir
 }
 
