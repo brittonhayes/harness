@@ -83,7 +83,7 @@ vala run "validate and test every rule in my detections directory, report failur
 ```
 
 > [!TIP]
-> Common flags: `--model <id>`, `--permission ask|allow|deny`, `--mode hunt|detect`, `--yes`.
+> Common flags: `--model <id>`, `--permission ask|auto`, `--mode hunt|detect`, `--yes`.
 > vala also auto-compacts as a turn approaches the context window (80% by
 > default) so long sessions never run out of room — tune it with
 > `context_window` / `auto_compact_threshold`, or set either to `0` to turn it off.
@@ -345,9 +345,10 @@ writes (`hunt_id`, `status`, `started_at`, relations like `hunts`/`detections`).
 Leave them empty to stay local.
 
 > [!WARNING]
-> Every non-read-only tool call is gated by `--permission`: `ask` (default)
-> prompts per call, `allow` auto-approves for unattended runs, `deny` blocks all
-> writes. Reach for `allow` only when you trust the run.
+> `--permission` controls interactivity: `ask` (default) keeps you hands-on and
+> prompts before strategic writes; `auto` is hands-off and lets vala add backlog
+> items, hunts, intel, coverage, and links as it works. Reach for `auto` only
+> when you trust the run.
 
 ## Development
 

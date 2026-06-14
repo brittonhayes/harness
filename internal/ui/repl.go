@@ -14,6 +14,7 @@ import (
 	"github.com/brittonhayes/vala/internal/permission"
 	"github.com/brittonhayes/vala/internal/session"
 	"github.com/brittonhayes/vala/internal/tool"
+	"github.com/brittonhayes/vala/internal/tools"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -42,6 +43,11 @@ type REPL struct {
 	// session banner so the operator sees what is available to hunt in (and any
 	// source that failed) rather than having the failure swallowed by stderr.
 	Evidence []mcp.EvidenceStatus
+
+	// Choice is the interactive operator-selection tool. When present, Run wires
+	// it into the Bubble Tea event loop so model-supplied choices render as a
+	// selector instead of plain text.
+	Choice *tools.Choose
 
 	styles  Styles
 	program *tea.Program
@@ -77,6 +83,20 @@ func (r *REPL) Run(ctx context.Context) error {
 		reply := make(chan bool, 1)
 		p.Send(permMsg{name: name, summary: summary, reply: reply})
 		return <-reply
+	}
+	if r.Choice != nil {
+		r.Choice.Prompt = func(choiceCtx context.Context, req tools.ChoiceRequest) (tools.ChoiceResponse, error) {
+			reply := make(chan tools.ChoiceResponse, 1)
+			p.Send(choiceMsg{req: req, reply: reply})
+			select {
+			case ans := <-reply:
+				return ans, nil
+			case <-choiceCtx.Done():
+				return tools.ChoiceResponse{Canceled: true}, choiceCtx.Err()
+			case <-ctx.Done():
+				return tools.ChoiceResponse{Canceled: true}, ctx.Err()
+			}
+		}
 	}
 
 	_, err := p.Run()

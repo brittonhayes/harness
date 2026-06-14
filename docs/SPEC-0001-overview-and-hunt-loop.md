@@ -129,7 +129,7 @@ specs (see the [index](README.md)).
   threat intel active against similar orgs, then what matters most given this
   environment's stack and assets.
 - **R-0001-14** **Maturity tunes autonomy, not behavior** — the maturity level
-  MUST only set the default permission mode and the prompt's gating framing (see
+  MUST only set the default permission profile and the prompt's gating framing (see
   [SPEC-0013](SPEC-0013-maturity-and-autonomy.md)). It MUST NOT add commands or
   tools, and MUST NOT itself act as a behavioral mode; within a given mode the
   loop and toolset are identical at every maturity level. (Behavioral
@@ -233,7 +233,7 @@ data check is a recorded gap rather than a silent skip (R-0001-08).
   validated data plan and with no recorded gap is rejected at close
   (`internal/brain/hunt_test.go` `TestLintHuntRejectsQueryBeforeValidation`).
 - **A-0001-07** (R-0001-14) The maturity level only changes the default
-  permission mode and the prompt's `# Operating maturity` framing; no tool or
+  permission profile and the prompt's `# Operating maturity` framing; no tool or
   command differs across levels (`internal/agent/prompt_test.go`
   `TestSystemPromptMaturityFraming`).
 

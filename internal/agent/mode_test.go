@@ -57,7 +57,7 @@ func testRegistry() *tool.Registry {
 func newAgent(t *testing.T, m mode.Mode) *Agent {
 	t.Helper()
 	sk := skills.NewSet(skills.Skill{Name: "sigma-authoring", Description: "checklist"})
-	return New(nil, testRegistry(), permission.New(permission.ModeAllow, nil), "/w", 10, 1,
+	return New(nil, testRegistry(), permission.New(permission.ModeAuto, nil), "/w", 10, 1,
 		"", Session{Mode: m, Skills: sk, EvidenceNames: []string{"scanner_execute_query"}})
 }
 
@@ -130,7 +130,7 @@ func TestRunToolUseRefusesFilteredTool(t *testing.T) {
 	r := tool.NewRegistry()
 	r.Register(fakeTool{name: "open_hunt", ran: &ran})
 	detect, _ := mode.Get("detect")
-	a := New(nil, r, permission.New(permission.ModeAllow, nil), "/w", 10, 1, "",
+	a := New(nil, r, permission.New(permission.ModeAuto, nil), "/w", 10, 1, "",
 		Session{Mode: detect, Skills: skills.NewSet(), EvidenceNames: nil})
 
 	// open_hunt is hidden in detect mode; naming it directly must not execute.
@@ -157,7 +157,7 @@ func TestRunToolUseEmitsFullResultButKeepsModelContent(t *testing.T) {
 		},
 	}
 	r.Register(fakeTool{name: "record_finding", result: cardResult})
-	a := New(nil, r, permission.New(permission.ModeAllow, nil), "/w", 10, 1, "",
+	a := New(nil, r, permission.New(permission.ModeAuto, nil), "/w", 10, 1, "",
 		Session{Mode: mode.Default(), Skills: skills.NewSet(), EvidenceNames: nil})
 
 	var observed tool.Result

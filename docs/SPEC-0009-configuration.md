@@ -85,7 +85,7 @@ specs that consume them (model/compaction to
   `1`), overridable by `VALA_MATURITY` (malformed value ignored). When
   `permission` is left unset (empty after all layers), it MUST be **derived** from
   `maturity` via `config.MaturityPermission` at the end of `Load`:
-  `0 → deny`, `1–2 → ask`, `3–4 → allow`. An explicit `permission` — from config,
+  `0–2 → ask`, `3–4 → auto`. An explicit `permission` — from config,
   `VALA_PERMISSION`, or the `--permission` flag — always wins, since it leaves
   `permission` non-empty and the derivation only fills an empty value. See
   [SPEC-0013](SPEC-0013-maturity-and-autonomy.md) for the full maturity model.
@@ -130,7 +130,7 @@ specs that consume them (model/compaction to
 | `VALA_PROVIDER` | override `provider` |
 | `VALA_MODEL` | override `model` |
 | `VALA_MODE` | override `mode` (`hunt`/`detect`); validated at startup (see SPEC-0014) |
-| `VALA_PERMISSION` | override `permission` (`ask`/`allow`/`deny`); wins over the maturity-derived default |
+| `VALA_PERMISSION` | override `permission` (`ask`/`auto`); wins over the maturity-derived default |
 | `VALA_MATURITY` | override `maturity` (int 0–4; malformed ignored); sets the default `permission` when none is set explicitly |
 | `VALA_CONTEXT_WINDOW` | override `context_window` (int; malformed ignored) |
 | `VALA_AUTO_COMPACT_THRESHOLD` | override `auto_compact_threshold` (float; malformed ignored) |
@@ -243,10 +243,10 @@ the file if absent).
 - **A-0009-07** (R-0009-09) `SaveNotion` overlays `notion` and leaves an existing
   unrelated key unchanged.
 - **A-0009-08** (R-0009-13) With no `permission` set, `Load` derives it from
-  `maturity` (`0→deny`, `1–2→ask`, `3–4→allow`); with `permission` set explicitly
+  `maturity` (`0–2→ask`, `3–4→auto`); with `permission` set explicitly
   (config, `VALA_PERMISSION`, or `--permission`), `Load` leaves it unchanged
   regardless of `maturity`; `VALA_MATURITY=3` and no explicit permission yields
-  `allow`.
+  `auto`.
 
 ## 6. Non-goals
 

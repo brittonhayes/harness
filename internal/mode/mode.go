@@ -57,6 +57,7 @@ type PromptInput struct {
 	Workdir       string
 	ToolNames     []string // already filtered to the tools the mode exposes
 	MaturityLevel int
+	Permission    string // ask | auto, the session interactivity profile
 }
 
 // Allow returns a tool policy that exposes exactly the named tools. Evidence and

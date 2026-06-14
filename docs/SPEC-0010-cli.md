@@ -69,9 +69,9 @@ permission gate ([SPEC-0011](SPEC-0011-permissions-and-safety.md)).
   config `mode` (`hunt`/`detect`; see [SPEC-0014](SPEC-0014-modes-and-skills.md));
   an empty flag value MUST leave the config value in place. An unknown `--mode`
   MUST fail with an error listing the valid ids.
-- **R-0010-06** `vala run` MUST default to denying non-read-only tools and MUST
-  auto-approve all calls when `--yes` is given (equivalent to permission
-  `allow`).
+- **R-0010-06** `vala run` in `ask` MUST block non-read-only tools because there
+  is no prompter, and MUST auto-approve all calls when `--yes` is given
+  (equivalent to permission `auto`).
 - **R-0010-07** When a Notion brain is already configured, `vala setup` MUST
   verify it and repair it in place rather than duplicate it: if one or more data
   sources are missing or unreachable it MUST re-create only the missing
@@ -119,7 +119,7 @@ permission gate ([SPEC-0011](SPEC-0011-permissions-and-safety.md)).
 | Persistent flag | Effect |
 |---|---|
 | `--model <id>` | override `model` |
-| `--permission <ask\|allow\|deny>` | override `permission` |
+| `--permission <ask\|auto>` | override `permission` |
 | `--mode <hunt\|detect>` | override `mode` (SPEC-0014) |
 | `--no-init-prompt` | suppress first-run notice |
 | `--require-brain` | fail if no Notion brain configured |

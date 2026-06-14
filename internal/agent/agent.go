@@ -132,6 +132,11 @@ func (a *Agent) SetMode(m mode.Mode) { a.applyMode(m) }
 // Mode reports the active mode, for the UI banner and /mode confirmation.
 func (a *Agent) Mode() mode.Mode { return a.mode }
 
+// RefreshPrompt recomputes the system prompt from the current mode and gate.
+// The UI calls this after toggling ask/auto so the interactivity profile affects
+// the model's next turn, not just the tool gate.
+func (a *Agent) RefreshPrompt() { a.applyMode(a.mode) }
+
 // applyMode sets the active mode and recomputes the derived state: the tool
 // exposure filter and the system prompt (which depends on the filtered tool
 // names and the mode's bundled skills).
@@ -142,7 +147,15 @@ func (a *Agent) applyMode(m mode.Mode) {
 		Workdir:       a.workdir,
 		ToolNames:     a.exposedToolNames(),
 		MaturityLevel: a.maturity,
+		Permission:    a.permissionProfile(),
 	}, a.skills.ByIDs(m.Skills), a.opCtx)
+}
+
+func (a *Agent) permissionProfile() string {
+	if a.gate == nil {
+		return "auto"
+	}
+	return string(a.gate.Mode)
 }
 
 // modeFilter derives the tool exposure predicate for a mode. The "skill" tool is

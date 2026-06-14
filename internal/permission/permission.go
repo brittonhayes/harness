@@ -1,8 +1,9 @@
-// Package permission gates state-changing tool calls. Detection & response
-// work routinely touches production systems (Notion, AWS, shells), so by
-// default the agent must get explicit approval before any non-read-only tool
-// runs. The mode and per-tool allowlist let an operator loosen this when they
-// trust a session.
+// Package permission controls the session's interactivity level. Detection &
+// response work routinely touches production systems (Notion, AWS, shells), so
+// ask mode keeps the operator in the loop before non-read-only tools run. Auto
+// mode is the hands-off profile for trusted sessions: the agent assumes
+// reasonable defaults and records backlog items, hunts, intel, and other
+// artifacts without step-by-step approval.
 package permission
 
 // Mode controls the default disposition for non-read-only tool calls.
@@ -11,36 +12,28 @@ type Mode string
 const (
 	// ModeAsk prompts the operator for each non-read-only, non-allowlisted call.
 	ModeAsk Mode = "ask"
-	// ModeAllow auto-approves every call (use for trusted, unattended runs).
-	ModeAllow Mode = "allow"
-	// ModeDeny rejects every non-read-only call (dry-run / investigation only).
-	ModeDeny Mode = "deny"
+	// ModeAuto auto-approves every call (use for trusted, unattended runs).
+	ModeAuto Mode = "auto"
 )
 
 // Parse converts a string into a Mode, defaulting to ModeAsk.
 func Parse(s string) Mode {
 	switch Mode(s) {
-	case ModeAllow:
-		return ModeAllow
-	case ModeDeny:
-		return ModeDeny
+	case ModeAuto, "allow": // "allow" is accepted for older configs.
+		return ModeAuto
 	default:
 		return ModeAsk
 	}
 }
 
-// NextMode returns the mode following m in the ask → allow → deny → ask cycle.
-// It backs the interactive shift+tab toggle so an operator can loosen or tighten
-// approval without restarting the session.
+// NextMode toggles between the two interactivity profiles. It backs the
+// interactive shift+tab toggle so an operator can switch between hands-on and
+// hands-off operation without restarting the session.
 func NextMode(m Mode) Mode {
-	switch m {
-	case ModeAsk:
-		return ModeAllow
-	case ModeAllow:
-		return ModeDeny
-	default:
+	if m == ModeAuto {
 		return ModeAsk
 	}
+	return ModeAuto
 }
 
 // Prompter asks the operator to approve a single call. It receives the tool
@@ -75,11 +68,8 @@ func (g *Gate) Allow(tool, summary string, readOnly bool) bool {
 
 // approveByMode applies the mode/allowlist/prompter decision behind Allow.
 func (g *Gate) approveByMode(tool, summary string) bool {
-	if g == nil || g.Mode == ModeAllow {
+	if g == nil || g.Mode == ModeAuto {
 		return true
-	}
-	if g.Mode == ModeDeny {
-		return false
 	}
 	if g.allowlist[tool] {
 		return true
@@ -91,14 +81,13 @@ func (g *Gate) approveByMode(tool, summary string) bool {
 	return false
 }
 
-// CycleMode advances the gate to the next permission mode and returns it.
+// CycleMode advances the gate to the next permission profile and returns it.
 func (g *Gate) CycleMode() Mode {
 	g.Mode = NextMode(g.Mode)
 	return g.Mode
 }
 
-// AllowTool adds a tool to the allowlist for the remainder of the session,
-// e.g. after an operator answers "always allow".
+// AllowTool adds a tool to the allowlist for the remainder of the session.
 func (g *Gate) AllowTool(name string) {
 	if g.allowlist == nil {
 		g.allowlist = map[string]bool{}

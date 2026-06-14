@@ -108,7 +108,7 @@ func TestLoadCompactionEnvOverrides(t *testing.T) {
 }
 
 func TestMaturityPermissionMapping(t *testing.T) {
-	cases := map[int]string{0: "deny", 1: "ask", 2: "ask", 3: "allow", 4: "allow"}
+	cases := map[int]string{0: "ask", 1: "ask", 2: "ask", 3: "auto", 4: "auto"}
 	for level, want := range cases {
 		if got := MaturityPermission(level); got != want {
 			t.Errorf("MaturityPermission(%d) = %q, want %q", level, got, want)
@@ -126,21 +126,21 @@ func TestLoadDerivesPermissionFromMaturity(t *testing.T) {
 	if cfg.Maturity != 4 {
 		t.Fatalf("Maturity = %d, want 4", cfg.Maturity)
 	}
-	if cfg.Permission != "allow" {
-		t.Errorf("Permission = %q, want allow (derived from HMM4)", cfg.Permission)
+	if cfg.Permission != "auto" {
+		t.Errorf("Permission = %q, want auto (derived from HMM4)", cfg.Permission)
 	}
 }
 
 func TestExplicitPermissionWinsOverMaturity(t *testing.T) {
 	dir := t.TempDir()
-	t.Setenv("VALA_MATURITY", "4") // would imply allow
-	t.Setenv("VALA_PERMISSION", "deny")
+	t.Setenv("VALA_MATURITY", "4") // would imply auto
+	t.Setenv("VALA_PERMISSION", "ask")
 	cfg, err := Load(dir)
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if cfg.Permission != "deny" {
-		t.Errorf("Permission = %q, want deny (explicit wins over maturity)", cfg.Permission)
+	if cfg.Permission != "ask" {
+		t.Errorf("Permission = %q, want ask (explicit wins over maturity)", cfg.Permission)
 	}
 }
 

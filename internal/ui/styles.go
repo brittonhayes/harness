@@ -40,6 +40,11 @@ type Styles struct {
 	// highlighted row stands out against the dim, unselected rows.
 	CompletionName lipgloss.Style
 	CompletionSel  lipgloss.Style
+
+	// Choice styles render the operator-selection tool.
+	ChoiceTitle    lipgloss.Style
+	ChoiceCursor   lipgloss.Style
+	ChoiceSelected lipgloss.Style
 }
 
 // DefaultStyles returns the vala color palette.
@@ -77,5 +82,9 @@ func DefaultStyles() Styles {
 
 		CompletionName: lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#00B4D8")),
 		CompletionSel:  lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FFFFFF")),
+
+		ChoiceTitle:    lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FFFFFF")),
+		ChoiceCursor:   lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FFFFFF")).Background(lipgloss.Color("#3A3A40")),
+		ChoiceSelected: lipgloss.NewStyle().Foreground(lipgloss.Color("#43BF6D")),
 	}
 }

@@ -64,8 +64,8 @@ gate itself is [SPEC-0011](SPEC-0011-permissions-and-safety.md).
 - **R-0003-07** The registry MUST provide `Register(...Tool)`, `Get(name)`,
   `All()` (sorted by name), and conversion to Anthropic tool params.
 - **R-0003-08** The registry MUST support a **filtered** conversion that drops
-  tools by predicate, so the harness can present only permitted tools when the
-  permission mode forbids the rest.
+  tools by predicate, so the harness can present only the tools exposed by the
+  active mode or other session policy.
 
 ### The toolbox
 
@@ -114,7 +114,7 @@ NewRegistry() *Registry
 ```
 
 `ToAnthropicFiltered` is how the harness narrows the advertised tool set (e.g.
-under `deny`, omit non-read-only tools).
+when a workflow mode hides hunt-lifecycle tools).
 
 ### The toolbox contents
 
@@ -145,7 +145,7 @@ Two arguments parameterize the box:
 - **A-0003-04** (R-0003-09, R-0003-11) `Toolbox(...)` returns one registry
   containing the built-in groups above plus every tool in `evidence...`.
 - **A-0003-05** (R-0003-10) A non-read-only tool returned by `Toolbox` is still
-  refused under permission mode `deny` (cross-check with
+  refused when the permission gate does not approve it (cross-check with
   [SPEC-0011](SPEC-0011-permissions-and-safety.md)).
 
 ## 6. Non-goals

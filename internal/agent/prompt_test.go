@@ -12,7 +12,7 @@ import (
 // huntPrompt is a small helper that renders the default (hunt) mode prompt.
 func huntPrompt(workdir string, tools []string, maturity int, ctx string) string {
 	return SystemPrompt(mode.Default(), mode.PromptInput{
-		Workdir: workdir, ToolNames: tools, MaturityLevel: maturity,
+		Workdir: workdir, ToolNames: tools, MaturityLevel: maturity, Permission: "ask",
 	}, nil, ctx)
 }
 
@@ -60,10 +60,23 @@ func TestSystemPromptMaturityFraming(t *testing.T) {
 	}
 }
 
+func TestSystemPromptInteractivityFraming(t *testing.T) {
+	ask := huntPrompt("/w", []string{"read"}, 1, "")
+	if !strings.Contains(ask, "cooperative") || !strings.Contains(ask, "checklist") {
+		t.Error("ask prompt should frame cooperative checklist decisions")
+	}
+	auto := SystemPrompt(mode.Default(), mode.PromptInput{
+		Workdir: "/w", ToolNames: []string{"read"}, MaturityLevel: 4, Permission: "auto",
+	}, nil, "")
+	if !strings.Contains(auto, "hands-off") || !strings.Contains(auto, "Record\nbacklog items") {
+		t.Error("auto prompt should frame hands-off artifact recording")
+	}
+}
+
 // TestHuntPromptGolden is the backward-compatibility contract: the hunt mode
-// prompt must reproduce the pre-modes output byte-for-byte for fixed inputs. The
-// golden files were captured from the original SystemPrompt before the modes
-// refactor (regenerate with -update only for an intentional change).
+// prompt must reproduce the expected output for fixed inputs. The golden files
+// pin the full text; a single trailing fixture newline is ignored so editors do
+// not create meaningless failures.
 func TestHuntPromptGolden(t *testing.T) {
 	cases := []struct {
 		golden   string
@@ -83,7 +96,7 @@ func TestHuntPromptGolden(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if got != string(want) {
+			if got != strings.TrimSuffix(string(want), "\n") {
 				t.Errorf("hunt prompt drifted from golden %s.\n--- got ---\n%s", c.golden, got)
 			}
 		})
@@ -98,7 +111,7 @@ func TestDetectPromptIsSpecialized(t *testing.T) {
 		t.Fatal("detect mode not registered")
 	}
 	active := []skills.Skill{{Name: "sigma-authoring", Description: "Sigma rule authoring checklist."}}
-	p := SystemPrompt(m, mode.PromptInput{Workdir: "/w", ToolNames: []string{"validate_detection", "skill"}, MaturityLevel: 1}, active, "")
+	p := SystemPrompt(m, mode.PromptInput{Workdir: "/w", ToolNames: []string{"validate_detection", "skill"}, MaturityLevel: 1, Permission: "ask"}, active, "")
 
 	if !strings.Contains(p, "Detection Engineering") {
 		t.Error("detect prompt should announce Detection Engineering mode")

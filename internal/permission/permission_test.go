@@ -12,9 +12,8 @@ func TestAllow(t *testing.T) {
 		prompt   Prompter
 		want     bool
 	}{
-		{name: "read-only always allowed", mode: ModeDeny, tool: "read", readOnly: true, want: true},
-		{name: "allow mode permits writes", mode: ModeAllow, tool: "bash", want: true},
-		{name: "deny mode blocks writes", mode: ModeDeny, tool: "bash", want: false},
+		{name: "read-only bypasses prompts", mode: ModeAsk, tool: "read", readOnly: true, want: true},
+		{name: "auto mode permits writes", mode: ModeAuto, tool: "bash", want: true},
 		{name: "allowlisted tool permitted in ask mode", mode: ModeAsk, allow: []string{"ntn"}, tool: "ntn", want: true},
 		{name: "ask mode without prompter fails closed", mode: ModeAsk, tool: "bash", want: false},
 		{name: "ask mode consults prompter (yes)", mode: ModeAsk, tool: "bash", prompt: func(_, _ string) bool { return true }, want: true},
@@ -43,9 +42,18 @@ func TestAllowToolAddsToSession(t *testing.T) {
 }
 
 func TestParse(t *testing.T) {
-	for in, want := range map[string]Mode{"allow": ModeAllow, "deny": ModeDeny, "ask": ModeAsk, "garbage": ModeAsk} {
+	for in, want := range map[string]Mode{"auto": ModeAuto, "allow": ModeAuto, "ask": ModeAsk, "deny": ModeAsk, "garbage": ModeAsk} {
 		if got := Parse(in); got != want {
 			t.Errorf("Parse(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+func TestNextModeTogglesAskAuto(t *testing.T) {
+	if got := NextMode(ModeAsk); got != ModeAuto {
+		t.Errorf("NextMode(ask) = %q, want auto", got)
+	}
+	if got := NextMode(ModeAuto); got != ModeAsk {
+		t.Errorf("NextMode(auto) = %q, want ask", got)
 	}
 }

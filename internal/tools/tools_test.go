@@ -107,7 +107,7 @@ func TestLS(t *testing.T) {
 
 func TestReadOnlyFlags(t *testing.T) {
 	readOnly := map[string]bool{
-		"read": true, "ls": true, "glob": true, "grep": true,
+		"read": true, "ls": true, "glob": true, "grep": true, "choose": true,
 		"validate_detection": true, "reference_detection": true, "test_detection": true,
 		"recall": true, "skill": true,
 	}
@@ -124,6 +124,49 @@ func TestReadOnlyFlags(t *testing.T) {
 		if notReadOnly[tl.Name()] && tl.ReadOnly() {
 			t.Errorf("%s should not be read-only", tl.Name())
 		}
+	}
+}
+
+func TestChooseReturnsOperatorSelection(t *testing.T) {
+	ch := &Choose{Prompt: func(_ context.Context, req ChoiceRequest) (ChoiceResponse, error) {
+		if req.Question != "Proceed?" {
+			t.Fatalf("question = %q, want Proceed?", req.Question)
+		}
+		if req.Mode != ChoiceMulti {
+			t.Fatalf("mode = %q, want multi", req.Mode)
+		}
+		if !req.AllowChat {
+			t.Fatal("allow_chat should default true")
+		}
+		return ChoiceResponse{Selected: []string{"A", "C"}, Message: "skip B"}, nil
+	}}
+
+	res := run(t, ch, map[string]any{
+		"question": "Proceed?",
+		"mode":     "multi",
+		"options": []map[string]any{
+			{"id": "A", "label": "Store hunt", "default": true},
+			{"id": "B", "label": "Update coverage"},
+			{"id": "C", "label": "Remember"},
+		},
+	})
+	if res.IsError {
+		t.Fatalf("choose failed: %s", res.Content)
+	}
+	for _, want := range []string{"A (Store hunt)", "C (Remember)", "operator note", "skip B"} {
+		if !strings.Contains(res.Content, want) {
+			t.Fatalf("choose result missing %q:\n%s", want, res.Content)
+		}
+	}
+}
+
+func TestChooseWithoutPromptFailsClosed(t *testing.T) {
+	res := run(t, &Choose{}, map[string]any{
+		"question": "Proceed?",
+		"options":  []map[string]any{{"id": "A", "label": "Approve"}},
+	})
+	if !res.IsError || !strings.Contains(res.Content, "unavailable") {
+		t.Fatalf("choose without prompt should fail closed, got: %#v", res)
 	}
 }
 

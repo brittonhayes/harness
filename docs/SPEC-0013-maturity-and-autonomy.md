@@ -30,7 +30,7 @@ top of both.
 
 - **Maturity (HMM level)** — an integer `0–4` naming the Hunting Maturity Model
   level the harness runs at. Default `1`.
-- **Permission mode** — `ask` | `allow` | `deny`, the gate over non-read-only
+- **Permission profile** — `ask` | `auto`, the gate over non-read-only
   tools (see [SPEC-0011](SPEC-0011-permissions-and-safety.md)).
 - **Maturity framing** — the `# Operating maturity` section the prompt appends,
   describing how much the agent should do before pausing.
@@ -41,16 +41,16 @@ top of both.
   defaulting to `1`, overridable by the `VALA_MATURITY` environment variable
   (parsed as an integer; a malformed value leaves the prior value unchanged).
 - **R-0013-02** When no explicit permission is set anywhere (config file,
-  `VALA_PERMISSION`, or `--permission`), the default permission mode MUST be
+  `VALA_PERMISSION`, or `--permission`), the default permission profile MUST be
   derived from the maturity level via `MaturityPermission(level)`:
 
   | HMM level | Sqrrl stage | Default permission |
   |---|---|---|
-  | 0 | Initial | `deny` |
+  | 0 | Initial | `ask` |
   | 1 | Minimal | `ask` |
   | 2 | Procedural | `ask` |
-  | 3 | Innovative | `allow` |
-  | 4 | Leading | `allow` |
+  | 3 | Innovative | `auto` |
+  | 4 | Leading | `auto` |
 
 - **R-0013-03** An explicit permission MUST always win over the maturity-derived
   default. The derivation MUST run at the end of config load and fill the
@@ -60,7 +60,7 @@ top of both.
 - **R-0013-04** The system prompt MUST append a `# Operating maturity` section
   whose text matches the level band (via `maturityFraming(level)`):
   - **HMM0** — investigate and propose only: draft and queue hypotheses, lay out
-    the hunt, but execute no writes; the operator approves each step.
+    the hunt, and ask before turning proposals into durable state.
   - **HMM1–2** — run the standard hunt procedures end to end, confirm each write,
     and pause for review at the decide/convert stage before authoring or changing
     a detection.
@@ -70,7 +70,7 @@ top of both.
 - **R-0013-05** Maturity MUST be an autonomy dial only: it MUST NOT add or remove
   commands or tools, and MUST NOT itself select a behavioral mode. Within a given
   mode the loop, the tools, and the lint gates are identical at every level; only
-  the default permission mode and the prompt framing change. Maturity is
+  the default permission profile and the prompt framing change. Maturity is
   orthogonal to modes ([SPEC-0014](SPEC-0014-modes-and-skills.md)): a mode chooses
   *what* the agent does, maturity chooses *how much* it does before pausing. This
   preserves the intent of [SPEC-0001](SPEC-0001-overview-and-hunt-loop.md)
@@ -91,7 +91,7 @@ if cfg.Permission == "" {
 }
 ```
 
-`MaturityPermission`: `level<=0 → "deny"`, `level>=3 → "allow"`, else `"ask"`.
+`MaturityPermission`: `level>=3 → "auto"`, else `"ask"`.
 
 The command layer (`internal/cmd/root.go`) applies `--permission` after `Load`
 and before constructing the gate, so the flag (like any explicit value) wins:
@@ -123,14 +123,14 @@ middle, autonomous operation at HMM3–4 — without changing what vala *is*.
 
 ## 5. Acceptance criteria
 
-- **A-0013-01** (R-0013-02) `MaturityPermission(0)=="deny"`,
+- **A-0013-01** (R-0013-02) `MaturityPermission(0)=="ask"`,
   `MaturityPermission(1)==MaturityPermission(2)=="ask"`,
-  `MaturityPermission(3)==MaturityPermission(4)=="allow"`.
+  `MaturityPermission(3)==MaturityPermission(4)=="auto"`.
 - **A-0013-02** (R-0013-03) With `Permission` set explicitly, `Load` leaves it
   unchanged regardless of `Maturity`; with `Permission` empty, `Load` sets it to
   `MaturityPermission(Maturity)`.
 - **A-0013-03** (R-0013-01) `VALA_MATURITY=3` sets `cfg.Maturity` to 3 and, with
-  no explicit permission, yields permission `allow`.
+  no explicit permission, yields permission `auto`.
 - **A-0013-04** (R-0013-04) The system prompt contains a `# Operating maturity`
   section whose text differs across the HMM0 / HMM1–2 / HMM3–4 bands
   (`internal/agent/prompt_test.go` `TestSystemPromptMaturityFraming`).
@@ -142,9 +142,9 @@ middle, autonomous operation at HMM3–4 — without changing what vala *is*.
 
 - **No new commands or tools.** Maturity adds none; it is permission default +
   framing only (R-0013-05).
-- **No per-tool maturity rules.** The gate is permission-mode + allowlist
+- **No per-tool maturity rules.** The gate is permission profile + allowlist
   ([SPEC-0011](SPEC-0011-permissions-and-safety.md)); maturity only sets the
-  default mode, it does not introduce per-tool maturity thresholds.
+  default profile, it does not introduce per-tool maturity thresholds.
 - **No auto-promotion.** vala does not advance the maturity level based on
   observed behavior; the operator sets it.
 

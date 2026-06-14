@@ -19,8 +19,8 @@ var runCmd = &cobra.Command{
 	Short: "Run a single non-interactive task",
 	Long: `Run executes one task and exits. Useful for scripting and automation.
 
-By default, non-read-only tools are denied in this mode (there is no operator
-to prompt). Pass --yes to auto-approve every tool call for an unattended run.`,
+By default, ask mode blocks non-read-only tools because there is no operator to
+prompt. Pass --yes or --permission auto for a hands-off unattended run.`,
 	Args: cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Non-interactive: warn on stderr when the brain is ephemeral and keep
@@ -39,13 +39,12 @@ to prompt). Pass --yes to auto-approve every tool call for an unattended run.`,
 			// error so the operator wires one up first.
 			return built.connectErr
 		}
-		// Non-interactive: no prompter. --yes forces allow; otherwise honor the
-		// configured mode but fail closed (deny) when it would need to ask.
+		// Non-interactive: no prompter. --yes forces auto; otherwise ask mode
+		// fails closed for non-read-only tools because there is nobody to answer.
 		if flagYes {
-			built.gate.Mode = permission.ModeAllow
+			built.gate.Mode = permission.ModeAuto
 		} else if built.gate.Mode == permission.ModeAsk {
-			built.gate.Mode = permission.ModeDeny
-			fmt.Fprintln(os.Stderr, "note: no TTY to prompt; non-read-only tools will be denied (use --yes to allow)")
+			fmt.Fprintln(os.Stderr, "note: no TTY to prompt; non-read-only tools will be blocked (use --yes or --permission auto)")
 		}
 
 		sess, _ := session.New(session.DefaultDir())
@@ -61,7 +60,7 @@ to prompt). Pass --yes to auto-approve every tool call for an unattended run.`,
 }
 
 func init() {
-	runCmd.Flags().BoolVar(&flagYes, "yes", false, "auto-approve all tool calls (unattended)")
+	runCmd.Flags().BoolVar(&flagYes, "yes", false, "use auto permission for this unattended run")
 }
 
 // printEvents renders the loop to stdout/stderr for one-shot runs and records

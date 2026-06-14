@@ -28,7 +28,7 @@ type Config struct {
 	Providers map[string]ProviderConfig `json:"providers"`
 	// MaxTokens caps the response size per turn.
 	MaxTokens int64 `json:"max_tokens"`
-	// Permission is the default permission mode: ask | allow | deny. Empty means
+	// Permission is the interactivity profile: ask | auto. Empty means
 	// "derive from Maturity" (see MaturityPermission): the maturity level sets the
 	// default autonomy, and an explicit permission (config, env, or flag) wins.
 	Permission string `json:"permission"`
@@ -38,11 +38,10 @@ type Config struct {
 	// selects the system prompt, the exposed tool subset, and the bundled skills.
 	Mode string `json:"mode"`
 	// Maturity is the Hunting Maturity Model level (0–4) the harness runs at. It
-	// tunes autonomy: it sets the default permission mode and frames the agent's
-	// gating in the system prompt. It is NOT a behavioral mode — the loop and
-	// tools are identical at every level; only how much runs without approval
-	// changes. 0 (initial) investigates only; 1–2 (minimal/procedural) ask before
-	// writes; 3–4 (innovative/leading) run autonomously.
+	// tunes autonomy: it sets the default permission profile and frames the
+	// agent's gating in the system prompt. It is NOT a behavioral mode — the loop
+	// and tools are identical at every level; only how much the agent cooperates
+	// before writing changes. 0–2 default to ask; 3–4 default to auto.
 	Maturity int `json:"maturity"`
 	// Allowlist names tools that may run without prompting.
 	Allowlist []string `json:"allowlist"`
@@ -153,18 +152,14 @@ func Default() Config {
 }
 
 // MaturityPermission maps a Hunting Maturity Model level to the default
-// permission mode it implies: HMM0 investigates read-only (deny writes), HMM1–2
-// ask before each write, and HMM3–4 run autonomously (allow). It is the default
-// only — an explicitly configured permission always wins.
+// permission profile it implies: HMM0–2 are hands-on ask mode, and HMM3–4 are
+// hands-off auto mode. It is the default only — an explicitly configured
+// permission always wins.
 func MaturityPermission(level int) string {
-	switch {
-	case level <= 0:
-		return "deny"
-	case level >= 3:
-		return "allow"
-	default:
-		return "ask"
+	if level >= 3 {
+		return "auto"
 	}
+	return "ask"
 }
 
 // Load resolves the effective configuration for the given working directory.

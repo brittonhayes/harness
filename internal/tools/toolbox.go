@@ -37,6 +37,8 @@ func Toolbox(dir string, rc *RunContext, sk *skills.Set, evidence ...tool.Tool) 
 		&LS{Dir: dir},
 		&Glob{Dir: dir},
 		&Grep{Dir: dir},
+		// Operator interaction.
+		&Choose{},
 		// Detection authoring: reference exemplars, validation, and a test runner,
 		// plus surgical comment-preserving field edits for Sigma rules.
 		&ReferenceDetection{},

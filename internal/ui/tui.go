@@ -10,6 +10,7 @@ import (
 	"github.com/brittonhayes/vala/internal/llm"
 	"github.com/brittonhayes/vala/internal/session"
 	"github.com/brittonhayes/vala/internal/tool"
+	"github.com/brittonhayes/vala/internal/tools"
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textarea"
@@ -24,6 +25,11 @@ var spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "�
 // maxInputLines caps how tall the input box grows as text wraps before it
 // starts to scroll internally, mirroring Claude Code's expanding composer.
 const maxInputLines = 10
+
+const (
+	inputPlaceholder  = "Ask vala to investigate, write a detection, or run a command…"
+	choicePlaceholder = "Type a reply or adjustment for vala…"
+)
 
 // --- messages forwarded from the agent goroutine into the event loop ---
 
@@ -87,6 +93,8 @@ type chatModel struct {
 
 	perm *permMsg // pending permission request, nil when none
 
+	choice *choicePrompt // pending operator choice request, nil when none
+
 	// Slash-command autocomplete: when the input is a bare "/foo" (no args yet),
 	// compMatches holds the fuzzy-ranked commands and compIdx the highlighted row.
 	compActive   bool
@@ -101,7 +109,7 @@ const maxCompletionRows = 8
 
 func newChatModel(r *REPL) chatModel {
 	ta := textarea.New()
-	ta.Placeholder = "Ask vala to investigate, write a detection, or run a command…"
+	ta.Placeholder = inputPlaceholder
 	ta.Prompt = "› "
 	ta.ShowLineNumbers = false
 	ta.CharLimit = 0
@@ -189,6 +197,14 @@ func (m chatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.ta.Blur()
 		return m, nil
 
+	case choiceMsg:
+		m.choice = newChoicePrompt(msg)
+		m.ta.Reset()
+		m.ta.Placeholder = inputPlaceholder
+		m.ta.Blur()
+		m.relayout()
+		return m, nil
+
 	case turnDoneMsg:
 		return m.onTurnDone(msg)
 
@@ -217,15 +233,19 @@ func (m chatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // onKey routes key presses, accounting for the permission modal and the
 // running/idle distinction.
 func (m chatModel) onKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// Operator choices capture the keyboard until answered. The choice UI has its
+	// own chat mode for free-form replies.
+	if m.choice != nil {
+		return m.onChoiceKey(msg)
+	}
+
 	// Permission modal captures the keyboard until answered.
 	if m.perm != nil {
 		switch strings.ToLower(msg.String()) {
 		case "y", "enter":
-			m.answerPerm(true, false)
-		case "a":
-			m.answerPerm(true, true)
+			m.answerPerm(true)
 		case "n", "esc", "ctrl+c":
-			m.answerPerm(false, false)
+			m.answerPerm(false)
 		}
 		return m, nil
 	}
@@ -281,9 +301,12 @@ func (m chatModel) onKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "enter":
 		return m.submit()
 	case "shift+tab":
-		// Cycle the permission disposition (ask → allow → deny) without leaving
-		// the session. The footer reflects the new mode immediately.
+		// Toggle the interactivity profile without leaving the session. The footer
+		// and next model turn both reflect the new profile.
 		m.repl.Gate.CycleMode()
+		if m.repl.Agent != nil {
+			m.repl.Agent.RefreshPrompt()
+		}
 		return m, nil
 	case "pgup", "pgdown", "ctrl+u", "ctrl+d":
 		var cmd tea.Cmd
@@ -567,19 +590,21 @@ func (m *chatModel) interrupt() {
 		m.perm = nil
 		m.ta.Focus()
 	}
+	if m.choice != nil {
+		m.choice.reply <- tools.ChoiceResponse{Canceled: true}
+		m.choice = nil
+		m.ta.Placeholder = inputPlaceholder
+		m.ta.Focus()
+	}
 	if m.cancel != nil {
 		m.cancel()
 	}
 }
 
-// answerPerm replies to the pending permission request, optionally allowlisting
-// the tool for the rest of the session.
-func (m *chatModel) answerPerm(allow, always bool) {
+// answerPerm replies to the pending permission request.
+func (m *chatModel) answerPerm(allow bool) {
 	if m.perm == nil {
 		return
-	}
-	if allow && always {
-		m.repl.Gate.AllowTool(m.perm.name)
 	}
 	m.perm.reply <- allow
 	if !allow {
@@ -606,11 +631,16 @@ func (m chatModel) View() string {
 	if panel := m.commandPanelView(); panel != "" {
 		parts = append(parts, panel)
 	}
+	if choice := m.choiceView(); choice != "" {
+		parts = append(parts, choice)
+	}
 	parts = append(parts,
 		m.statusLine(),
 		box.Width(max(1, m.width-2)).Render(m.ta.View()),
-		m.footer(),
 	)
+	if footer := m.footer(); footer != "" {
+		parts = append(parts, footer)
+	}
 	return lipgloss.JoinVertical(lipgloss.Left, parts...)
 }
 
@@ -674,12 +704,11 @@ func (m chatModel) commandPanelHeight() int {
 // statusLine sits just above the input: the activity spinner while running, the
 // permission request when one is pending, or a blank spacer when idle.
 func (m chatModel) statusLine() string {
+	if m.choice != nil {
+		return "  " + m.styles.SpinnerLabel.Render("waiting for your choice")
+	}
 	if m.perm != nil {
-		line := "  " + m.styles.Permission.Render("permission needed") + "  " + m.styles.ToolCall.Render(m.perm.name)
-		if s := oneLine(m.perm.summary, 72); s != "" {
-			line += "  " + m.styles.ToolMeta.Render(s)
-		}
-		return line
+		return m.permissionLine()
 	}
 	if !m.running {
 		return ""
@@ -695,31 +724,55 @@ func (m chatModel) statusLine() string {
 	return line
 }
 
-func (m chatModel) footer() string {
-	if m.perm != nil {
-		return "  " + m.styles.PermissionKey.Render("[y]es  ·  [n]o  ·  [a]lways allow this tool")
+func (m chatModel) permissionLine() string {
+	width := max(24, m.width-4)
+	lines := []string{
+		"  " + m.styles.Permission.Render("approve") + " " + m.styles.ToolCall.Render(m.perm.name) + m.styles.Permission.Render("?"),
 	}
-	// Only the non-obvious control survives: the permission mode and how to cycle
-	// it. Send/newline/scroll/quit are universal terminal conventions — showing
-	// them is noise.
+	if summary := strings.TrimSpace(m.perm.summary); summary != "" {
+		for _, line := range wrapChoiceText(summary, width-2) {
+			lines = append(lines, "    "+m.styles.ToolMeta.Render(line))
+		}
+	}
+	lines = append(lines, "  "+
+		m.styles.PermissionKey.Render("Y")+m.styles.Hint.Render(" approve")+
+		m.styles.Hint.Render(" · ")+
+		m.styles.PermissionKey.Render("N")+m.styles.Hint.Render(" deny"))
+	return strings.Join(lines, "\n")
+}
+
+func (m chatModel) statusHeight() int {
+	line := m.statusLine()
+	if line == "" {
+		return 1
+	}
+	return strings.Count(line, "\n") + 1
+}
+
+func (m chatModel) footer() string {
+	if m.choice != nil {
+		return m.choiceFooter()
+	}
+	if m.perm != nil {
+		return ""
+	}
+	// Only the non-obvious control survives: the interactivity profile and how to
+	// toggle it. Send/newline/scroll/quit are universal terminal conventions —
+	// showing them is noise.
 	parts := []string{m.styles.Mode.Render("⏵⏵ " + m.modeLabel())}
 	if active := m.activeModeLabel(); active != "" {
 		parts = append(parts, m.styles.Hint.Render("mode "+active))
 	}
-	parts = append(parts, m.styles.Hint.Render("shift+tab to cycle"))
+	parts = append(parts, m.styles.Hint.Render("shift+tab to toggle ask/auto"))
 	return "  " + strings.Join(parts, m.styles.Hint.Render("  ·  "))
 }
 
-// modeLabel renders the gate's current permission disposition for the footer.
+// modeLabel renders the gate's current interactivity profile for the footer.
 func (m chatModel) modeLabel() string {
-	switch string(m.repl.Gate.Mode) {
-	case "allow":
-		return "auto-allow"
-	case "deny":
-		return "deny-all"
-	default:
-		return "ask"
+	if string(m.repl.Gate.Mode) == "auto" {
+		return "auto"
 	}
+	return "ask"
 }
 
 // activeModeLabel renders the current specialization for the footer.
@@ -933,7 +986,11 @@ func (m chatModel) viewportHeight() int {
 		lines = m.inputLines()
 	}
 	inputBox := lines + 2 // rounded border top and bottom
-	h := m.height - inputBox - 1 /*status*/ - 1 /*footer*/ - m.completionHeight() - m.commandPanelHeight()
+	footer := 1
+	if m.perm != nil {
+		footer = 0
+	}
+	h := m.height - inputBox - m.statusHeight() - footer - m.completionHeight() - m.commandPanelHeight() - m.choiceHeight()
 	if h < 3 {
 		h = 3
 	}

@@ -81,6 +81,7 @@ single non-interactive task.`,
 			sessionContext(cmd.Context(), built.cwd, built.rc.Brain), built.session())
 		repl := ui.New(ag, built.gate, sess, modelLabel(built.client), contextWindow(built.client, built.cfg), built.cfg.AutoCompactThreshold)
 		repl.Evidence = built.evidence
+		repl.Choice = tools.ChoiceFromRegistry(built.registry)
 		// Wire /connect: rebuild a provider from the latest stored credentials so
 		// the operator can connect or switch providers without leaving the session.
 		repl.Connect = func(provider, model string) (llm.Provider, error) {
@@ -100,7 +101,7 @@ func Execute() {
 
 func init() {
 	rootCmd.PersistentFlags().StringVar(&flagModel, "model", "", "Anthropic model ID (overrides config)")
-	rootCmd.PersistentFlags().StringVar(&flagPermission, "permission", "", "permission mode: ask | allow | deny")
+	rootCmd.PersistentFlags().StringVar(&flagPermission, "permission", "", "interactivity profile: ask | auto")
 	rootCmd.PersistentFlags().StringVar(&flagMode, "mode", "", "specialization: hunt | detect")
 	rootCmd.PersistentFlags().BoolVar(&flagNoInitPrompt, "no-init-prompt", false, "suppress the first-run notice when no Notion brain is configured")
 	rootCmd.PersistentFlags().BoolVar(&flagRequireBrain, "require-brain", false, "fail instead of falling back to the ephemeral in-memory brain")

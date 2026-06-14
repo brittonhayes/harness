@@ -29,6 +29,8 @@ func SystemPrompt(m mode.Mode, in mode.PromptInput, active []skills.Skill, opera
 	b.WriteString("\n\n# Operating principles\n")
 	b.WriteString(operatingPrinciples)
 	b.WriteString("\n\n")
+	b.WriteString(interactivityFraming(in.Permission))
+	b.WriteString("\n\n")
 	b.WriteString(m.PromptBody(in))
 	b.WriteString("\n\n")
 	b.WriteString(maturityFraming(in.MaturityLevel))
@@ -46,14 +48,39 @@ const operatingPrinciples = `- Investigate before you act. Read logs, configs, a
   read/grep/glob/ls before drawing conclusions or making changes.
 - Make the smallest change that accomplishes the goal. Use edit for targeted
   changes; use write for new files.
-- Non-read-only tools (bash, write, edit, ntn) may require operator approval.
-  If a call is denied, adapt — propose an alternative, don't loop on it.
+- Non-read-only tools (bash, write, edit, ntn, brain writes) follow the current
+  interactivity profile. If a call is denied, adapt — propose an alternative,
+  don't loop on it.
+- When you need an operator decision among concrete options, call "choose"
+  instead of asking for A/B/C in plain chat. Use single mode for one decision,
+  multi mode for checklists, and mark recommended defaults.
 - Be explicit about findings: severity, affected entities, evidence, and the
   MITRE ATT&CK technique when relevant.
 - When a hunt teaches you a durable fact about this environment — where a log
   source lives, a known-good baseline, a naming convention — call "remember" to
   save it to VALA.md so future sessions start informed. Never store secrets.
 - When you have completed the task, stop and summarize what you did and found.`
+
+// interactivityFraming tells the model how to behave under the operator's chosen
+// permission profile. The permission gate enforces the hard write behavior; this
+// section makes the same setting shape planning and decision cadence.
+func interactivityFraming(profile string) string {
+	const header = "# Interactivity profile\n"
+	if profile == "auto" {
+		return header + `This session is in auto mode. The operator wants a hands-off run: make
+reasonable assumptions, choose the highest-signal path, and keep going. Record
+backlog items, open hunts, store intel, update coverage, and link artifacts when
+they are useful instead of asking for step-by-step approval. Pause only for
+missing credentials, destructive/outward-facing actions, or an ambiguity that
+would materially change the outcome.`
+	}
+	return header + `This session is in ask mode. The operator wants cooperative
+co-decision making: investigate enough to form good options, then ask before
+turning strategic choices into state. When there are multiple plausible backlog
+items, hunts, intel records, coverage updates, or next steps, call "choose" with
+a compact checklist and recommended defaults; wait for the operator's selected
+options or chat adjustment before writing them.`
+}
 
 // skillsSection renders the prompt's Skills section for progressive disclosure:
 // the active skills by name and description, with a pointer to the skill tool. It
@@ -103,8 +130,8 @@ func maturityFraming(level int) string {
 	case level <= 0:
 		return header + `This environment runs at HMM0 (initial). Investigate and propose only: draft
 hypotheses, queue them with "queue_hunt", and lay out the hunt you would run, but
-do not execute writes — the operator approves each step. Default to recall and
-queue over acting.`
+ask before turning proposals into durable state. Default to recall and queue over
+acting.`
 	case level == 1, level == 2:
 		return header + `This environment runs at HMM1–2 (minimal/procedural). Run the standard hunt
 procedures end to end, but expect to confirm each write with the operator. Pause

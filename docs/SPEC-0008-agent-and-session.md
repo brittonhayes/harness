@@ -92,7 +92,7 @@ loading ([SPEC-0009](SPEC-0009-configuration.md)).
 Run(input):
   history += user(input)
   for step in 0..MaxSteps-1:
-     resp = llm.Complete(system, history, tools)   # tools filtered by permission mode
+     resp = llm.Complete(system, history, tools)   # tools exposed by active mode
      history += resp ; emit OnUsage
      results = []
      for block in resp:
